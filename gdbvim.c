@@ -4,6 +4,7 @@
 #include <poll.h>
 #include <string.h>
 #include <getopt.h>
+#include <stdlib.h>
 
 #define BUFF_SIZE	1024
 
@@ -42,11 +43,11 @@ int loop(int ptym)
 }
 
 static char *prog_name = "gdbvim";
-static char *gdb_exe = "gdb";
+static char *gdb_bin_name;
 
 static void show_help(void)
 {
-	printf("Usage: %s -x gdb_exe_name\n", prog_name);
+	printf("Usage: %s -x gdb_bin_name\n", prog_name);
 	printf("for help, type -h\n");
 }
 
@@ -64,13 +65,9 @@ static char *get_prog_name(char *str)
 static int parse_args(int argc, char *argv[])
 {
 	int c;
+	char *path;
 
-	if (argc == 1) {
-		printf("Warning: No gdb executable specified, assuming "
-		       "\"gdb\" as the default back-end\n");
-		return 0;
-	}
-
+	gdb_bin_name = getenv("GDB_BIN_NAME");
 	prog_name = get_prog_name(argv[0]);
 
 	/* Option processing */
@@ -82,8 +79,8 @@ static int parse_args(int argc, char *argv[])
 
 		switch (c) {
 		case 'x':
-			gdb_exe = optarg;
-			//FIXME: check if gdb_exe is in the path
+			gdb_bin_name = optarg;
+			//FIXME: check if gdb_bin_name is in the path
 			break;
 		case 'h':
 			show_help();
@@ -103,6 +100,14 @@ static int parse_args(int argc, char *argv[])
 			"unknown option\n", prog_name);
 		return -1;
 	}
+
+	if (argc == 1 && !gdb_bin_name) {
+		printf("Warning: No gdb executable specified, assuming "
+		       "\"gdb\" as the default back-end\n");
+		gdb_bin_name = "gdb";
+		return 0;
+	}
+
 
 	return 0;
 }
@@ -125,7 +130,7 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 	else if (pid == 0) {	/* Child */
-		execlp(gdb_exe, gdb_exe, "--interpreter=mi", NULL);
+		execlp(gdb_bin_name, gdb_bin_name, "--interpreter=mi", NULL);
 	}
 
 	/* Parent */
