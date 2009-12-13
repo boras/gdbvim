@@ -5,6 +5,7 @@
 #include <string.h>
 #include <getopt.h>
 #include <stdlib.h>
+#include <termios.h>
 
 #define BUFF_SIZE	1024
 
@@ -115,6 +116,7 @@ static int parse_args(int argc, char *argv[])
 int main(int argc, char *argv[])
 {
 	int ptym, pid;
+	struct termios stermios;
 	int ret = 0;
 
 	/* Before going further, parse arguments */
@@ -130,6 +132,13 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 	else if (pid == 0) {	/* Child */
+		tcgetattr(STDIN_FILENO, &stermios);
+		/* Turn echo'ing off */
+		stermios.c_lflag &= ~(ECHO | ECHOE | ECHOK | ECHONL);
+		/* Turn NL -> CR/NL output mapping off */
+		stermios.c_oflag &= ~(ONLCR);
+		tcsetattr(STDIN_FILENO, TCSANOW, &stermios);
+
 		execlp(gdb_bin_name, gdb_bin_name, "--interpreter=mi", NULL);
 	}
 
