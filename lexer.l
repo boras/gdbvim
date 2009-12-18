@@ -1,57 +1,48 @@
+%{
+#include "parser.tab.h"
+%}
 
-DIGIT			[0-9]+
+DIGITS			[0-9]+
 IDENTIFIER		[a-zA-Z_][a-zA-Z0-9_-]*
 C_STRING		\"([^"\\]|\\.)*\"
-SKIP_WS			[ \t\n]
+SKIP_WS			[ \t]
 %%
-"(gdb)"			{printf("gdb_prompt = %s\n", yytext);}
+"(gdb)"			{printf("gdb_prompt\n"); return TOKEN_GDB_PROMPT;}
 
-"^"			{printf("caret = %s\n", yytext);}
-","			{printf("comma = %s\n", yytext);}
+"^"			{printf("caret\n"); return *yytext;}
+","			{printf("comma\n"); return *yytext;}
 
-"*"			{printf("star = %s\n", yytext);}
-"+"			{printf("plus = %s\n", yytext);}
-"="			{printf("equal = %s\n", yytext);}
-"~"			{printf("tilde = %s\n", yytext);}
-"@"			{printf("at = %s\n", yytext);}
-"&"			{printf("ampersand = %s\n", yytext);}
+"*"			{printf("star\n"); return *yytext;}
+"+"			{printf("plus\n"); return *yytext;}
+"="			{printf("equal\n"); return *yytext;}
+"~"			{printf("tilde\n"); return *yytext;}
+"@"			{printf("at_sign\n"); return *yytext;}
+"&"			{printf("ampersand\n"); return *yytext;}
 
-"done"			{printf("done = %s\n", yytext);}
-"running"		{printf("running = %s\n", yytext);}
-"connected"		{printf("connected = %s\n", yytext);}
-"error"			{printf("error = %s\n", yytext);}
-"exit"			{printf("exit = %s\n", yytext);}
-"stopped"		{printf("stopped = %s\n", yytext);}
+"done"			{printf("done\n"); return TOKEN_RESULT_DONE;}
+"running"		{printf("running\n"); return TOKEN_RESULT_RUNNING;}
+"connected"		{printf("connected\n"); return TOKEN_RESULT_CONNECTED;}
+"error"			{printf("error\n"); return TOKEN_RESULT_ERROR;}
+"exit"			{printf("exit\n"); return TOKEN_RESULT_EXIT;}
+"stopped"		{printf("stopped\n"); return TOKEN_ASYNC_STOPPED;}
 
-"{}"			{printf("brace = %s\n", yytext);}
-"{" 			{printf("opening brace = %s\n", yytext);}
-"}" 			{printf("closing brace = %s\n", yytext);}
-"[]"			{printf("square bracket = %s\n", yytext);}
-"[" 			{printf("opening square bracket = %s\n", yytext);}
-"]" 			{printf("closing square bracket = %s\n", yytext);}
+"{" 			{printf("opening_brace\n"); return *yytext;}
+"}" 			{printf("closing_brace\n"); return *yytext;}
+"[" 			{printf("opening_bracket\n"); return *yytext;}
+"]" 			{printf("closing_bracket\n"); return *yytext;}
 
-{DIGIT}			{printf("digit = %s\n", yytext);}
-{C_STRING}		{printf("c-string = %s\n", yytext);}
-{IDENTIFIER}		{printf("identifier = %s\n", yytext);}
+"\n"			{printf("newline\n"); return TOKEN_NEWLINE;}
+"\r\n"			{printf("newline\n"); return TOKEN_NEWLINE;}
+"\r"			{printf("newline\n"); return TOKEN_NEWLINE;}
+
+{DIGITS}		{printf("digits\n"); return TOKEN_DIGITS;}
+{C_STRING}		{printf("cstring\n"); return TOKEN_CSTRING;}
+{IDENTIFIER}		{printf("identifier\n"); return TOKEN_IDENTIFIER;}
 {SKIP_WS}		/* Skip */
 %%
 
 int yywrap(void)
 {
 	return 1;
-}
-
-int main(void)
-{
-	if (!(yyin = fopen("out", "r"))) {
-		fprintf(stderr, "Cannot open the file called \"out\"");
-		return -1;
-	}
-
-	yylex();
-
-	fclose(yyin);
-
-	return 0;
 }
 
