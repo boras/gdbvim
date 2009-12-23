@@ -3,7 +3,7 @@
  * We have to insert "parser.h" here, otherwise bison %union declaration
  * does not see typedef declarations.
  */
-#include "parser.h"
+#include "parsetree.h"
 #include "grammar.tab.h"
 %}
 

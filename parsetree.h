@@ -1,5 +1,5 @@
-#ifndef __PARSER_H__
-#define __PARSER_H__
+#ifndef __PARSETREE_H__
+#define __PARSETREE_H__
 
 /* stream record messages */
 typedef enum stream_type {
@@ -169,4 +169,4 @@ gdbmi_output_t *create_gdbmi_output(oob_record_t *oob_rec_ptr,
 void destroy_gdbmi_output(void);
 void print_gdmi_output(void);
 
-#endif /* __PARSER_H__ */
+#endif /* __PARSETREE_H__ */
