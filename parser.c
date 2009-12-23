@@ -435,10 +435,12 @@ void print_stream_record(stream_record_t *stream_rec_ptr)
 
 void destroy_result_record(result_record_t *result_rec_ptr)
 {
-	if (result_rec_ptr->token)
-		free(result_rec_ptr->token);
-	destroy_result_list(result_rec_ptr->result_ptr);
-	free(result_rec_ptr);
+	if (result_rec_ptr) {
+		if (result_rec_ptr->token)
+			free(result_rec_ptr->token);
+		destroy_result_list(result_rec_ptr->result_ptr);
+		free(result_rec_ptr);
+	}
 }
 
 void print_result_record(result_record_t *result_rec_ptr)
@@ -471,30 +473,30 @@ void print_result_record(result_record_t *result_rec_ptr)
 
 void destroy_oob_record(oob_record_t *oob_rec_ptr)
 {
-	oob_record_t *iter = oob_rec_ptr;
+	oob_record_t *cur = oob_rec_ptr;
 	oob_record_t *prev;
 
-	while (iter) {
-		if (iter->rtype == STREAM_RECORD)
-			destroy_stream_record(iter->r.stream_rec_ptr);
-		else if (iter->rtype == ASYNC_RECORD)
-			destroy_async_record(iter->r.async_rec_ptr);
-		prev = iter;
-		iter = iter->next;
+	while (cur) {
+		if (cur->rtype == STREAM_RECORD)
+			destroy_stream_record(cur->r.stream_rec_ptr);
+		else if (cur->rtype == ASYNC_RECORD)
+			destroy_async_record(cur->r.async_rec_ptr);
+		prev = cur;
+		cur = cur->next;
 		free(prev);
 	}
 }
 
 void print_oob_record(oob_record_t *oob_rec_ptr)
 {
-	oob_record_t *iter = oob_rec_ptr;
+	oob_record_t *cur = oob_rec_ptr;
 
-	while (iter != NULL) {
-		if (iter->rtype == STREAM_RECORD)
-			print_stream_record(iter->r.stream_rec_ptr);
-		else if (iter->rtype == ASYNC_RECORD)
-			print_async_record(iter->r.async_rec_ptr);
-		iter = iter->next;
+	while (cur != NULL) {
+		if (cur->rtype == STREAM_RECORD)
+			print_stream_record(cur->r.stream_rec_ptr);
+		else if (cur->rtype == ASYNC_RECORD)
+			print_async_record(cur->r.async_rec_ptr);
+		cur = cur->next;
 	}
 }
 
@@ -517,7 +519,7 @@ void print_gdbmi_output(void)
 
 void yyerror(const char *str)
 {
-	printf("Fatal error: %s\n", str);
+	printf("%s: %s\n", __FUNCTION__, str);
 }
 
 int main(void)
