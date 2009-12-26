@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include "parser.h"
-#include "parsetree.h"
 
 frame_info_t *alloc_frame_info(void)
 {
@@ -142,7 +141,7 @@ void mi_print_frame_info(frame_info_t *finfo_ptr)
  * For a given result_list, it finds the frame variable and after getting
  * its value, fills in the frame structure.
  */
-frame_info_t *mi_parse_frame(result_t *rlist)
+static frame_info_t *mi_parse_frame(result_t *rlist)
 {
 	value_t *v;
 	result_t *r;
@@ -230,51 +229,4 @@ void mi_print_console_stream(gdbmi_output_t *gdbmi_out_ptr)
 		}
 		cur = cur->next;
 	}
-}
-
-int main_loop(void)
-{
-	async_record_t *async_rec_ptr;
-	frame_info_t *finfo_ptr;
-
-	/* Print console stream messages */
-	mi_print_console_stream(gdbmi_out_ptr);
-	/* Frame information is retrieved from exec async record */
-	if (async_rec_ptr = mi_get_exec_async_record(gdbmi_out_ptr)) {
-		finfo_ptr = mi_get_frame(async_rec_ptr);
-		mi_print_frame_info(finfo_ptr);
-		free_frame_info(finfo_ptr);
-	}
-	else
-		printf("There is no exec async record\n");
-	/*
-	 * FIXME: ERROR should be handled. It has an associated
-	 * var=cstring. Others, EXIT,CONNECTED, and RUNNING do
-	 * not have var=value pairs.
-	 */
-
-	return 0;
-}
-
-void yyerror(const char *str)
-{
-	printf("%s: %s\n", __FUNCTION__, str);
-}
-
-int main(void)
-{
-	/* Start parsing */
-	yyparse();
-
-	/* Check if there is a valid gdb/mi output */
-	if (gdbmi_out_ptr) {
-		main_loop();
-		destroy_gdbmi_output();
-		gdbmi_out_ptr = NULL;
-	}
-	else
-		printf("Partial or wrong gdbmi output. Syntax or "
-		       "grammar problem?\n");
-
-	return 0;
 }
