@@ -6,14 +6,61 @@
 #include <getopt.h>
 #include <stdlib.h>
 #include <termios.h>
+#include "parser.h"
 
-#define BUFF_SIZE	1024
+#define BUFFER_SIZE	1024
 
-int loop(int ptym)
+/* Extern declarations */
+typedef struct yy_buffer_state *YY_BUFFER_STATE;
+extern YY_BUFFER_STATE yy_scan_string(const char *yy_str);
+extern void yy_delete_buffer(YY_BUFFER_STATE b);
+extern void yy_flush_buffer(YY_BUFFER_STATE b);
+
+void parse_mi_output(char *str)
 {
-	char buff[BUFF_SIZE];
+	YY_BUFFER_STATE scanner_state;
+
+	scanner_state = yy_scan_string(str);
+
+	/* Start parsing */
+	yyparse();
+
+	/* Check if there is a valid gdb/mi output */
+	if (gdbmi_out_ptr) {
+		async_record_t *async_rec_ptr;
+		frame_info_t *finfo_ptr;
+
+		/* Print console stream messages */
+		mi_print_console_stream(gdbmi_out_ptr);
+		/* Frame information is retrieved from exec async record */
+		if (async_rec_ptr = mi_get_exec_async_record(gdbmi_out_ptr)) {
+			finfo_ptr = mi_get_frame(async_rec_ptr);
+			mi_print_frame_info(finfo_ptr);
+			free_frame_info(finfo_ptr);
+		}
+		else
+			printf("There is no exec async record\n");
+		/*
+		 * FIXME: ERROR should be handled. It has an associated
+		 * var=cstring. Others, EXIT,CONNECTED, and RUNNING do
+		 * not have var=value pairs.
+		 */
+		destroy_gdbmi_output();
+		gdbmi_out_ptr = NULL;
+	}
+	else
+		printf("Partial or wrong gdbmi output. Syntax or "
+		       "grammar problem?\n");
+
+	yy_delete_buffer(scanner_state);
+}
+
+int main_loop(int ptym)
+{
+	char buf[BUFFER_SIZE];
+	char *buf_ptr = buf;
 	struct pollfd fds[2];
-	int nread;
+	int nread, nread_total = 0;
 	int ret;
 
 	/* The descriptors to be listened */
@@ -31,12 +78,59 @@ int loop(int ptym)
 			return ret;
 		}
 		if (fds[0].revents == POLLIN) {
-			nread = read(fds[0].fd, buff, BUFF_SIZE);
-			write(ptym, buff, nread);
+			/*
+			 * pseudo gdb/cli interface. Commands are read by
+			 * readline library. Tab completion should be there.
+			 * Afterwards they are converted to gdb/mi input
+			 * commands.
+			 */
+			nread = read(fds[0].fd, buf, BUFFER_SIZE);
+			write(ptym, buf, nread);
 		}
 		if (fds[1].revents == POLLIN) {
-			nread = read(fds[1].fd, buff, BUFF_SIZE);
-			write(STDIN_FILENO, buff, nread);
+			/*
+			 * gdb/mi output. Two things should be done.
+			 * 1. gdb/mi output is converted to the gdb/cli form.
+			 * 2. file and line information is obtained to have
+			 * Vim show the file and line in question by using
+			 * signs.
+			 */
+			nread = read(fds[1].fd, buf_ptr, BUFFER_SIZE);
+			printf("nread = %d\n", nread);
+			/*
+			 * Before giving the buffer for parsing, we must
+			 * ensure that it contains valid gdb/mi output.
+			 * If there ara some data and we pass it immediately
+			 * there is a high chance that it has not been
+			 * complete yet. So for every read we should compare
+			 * its last 7 characters to (gdb) \n. (gdb) \n
+			 * notation represents the end of gdb/mi output.
+			 * The space between ')' and '\n' is not mentioned
+			 * in the documentation but we verified that it is
+			 * placed.
+			 */
+			if (!strncmp(&buf_ptr[nread - 7], "(gdb) \n", 7)) {
+				printf("\nraw_begin\n");
+				/*
+				 * It covers two situation: If the last block
+				 * or the only block is (gdb) \n.
+				 */
+				nread_total += nread;
+				write(STDIN_FILENO, buf, nread_total);
+				printf("\nraw_end\n\n");
+
+				/* Scanner expects a null terminated string */
+				buf[nread_total] = '\0';
+				parse_mi_output(buf);
+				/* Reset the buffer head */
+				buf_ptr = buf;
+				nread_total = 0;
+			}
+			else {
+				/* gdb/mi output are accumulated */
+				buf_ptr += nread;
+				nread_total += nread;
+			}
 		}
 	}
 
@@ -143,7 +237,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* Parent */
-	loop(ptym); /* Copies stdin -> ptym, ptym -> stdin */
+	main_loop(ptym); /* Copies stdin -> ptym, ptym -> stdin */
 
 	return 0;
 }

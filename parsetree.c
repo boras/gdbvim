@@ -516,3 +516,8 @@ void print_gdbmi_output(void)
 		print_result_record(gdbmi_out_ptr->result_rec_ptr);
 	}
 }
+
+void yyerror(const char *str)
+{
+	printf("%s: %s\n", __FUNCTION__, str);
+}
