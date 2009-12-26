@@ -200,14 +200,19 @@ frame_info_t *mi_get_frame(async_record_t *async_rec_ptr)
 
 async_record_t *mi_get_exec_async_record(gdbmi_output_t *gdbmi_out_ptr)
 {
-	oob_record_t *cur = gdbmi_out_ptr->oob_rec_ptr;
+	gdbmi_output_t *out_cur = gdbmi_out_ptr;
+	oob_record_t *oob_cur;
 
-	while (cur) {
-		if (cur->rtype == ASYNC_RECORD &&
-		    cur->r.async_rec_ptr->atype == EXEC_ASYNC)
-			return cur->r.async_rec_ptr;
-		cur = cur->next;
-	}
+	do {
+		oob_cur = out_cur->oob_rec_ptr;
+		while (oob_cur) {
+			if (oob_cur->rtype == ASYNC_RECORD &&
+			    oob_cur->r.async_rec_ptr->atype == EXEC_ASYNC)
+				return oob_cur->r.async_rec_ptr;
+			oob_cur = oob_cur->next;
+		}
+		out_cur = out_cur->next;
+	} while (out_cur);
 
 	return NULL;
 }
@@ -217,16 +222,22 @@ async_record_t *mi_get_exec_async_record(gdbmi_output_t *gdbmi_out_ptr)
  */
 void mi_print_console_stream(gdbmi_output_t *gdbmi_out_ptr)
 {
-	oob_record_t *cur = gdbmi_out_ptr->oob_rec_ptr;
+	gdbmi_output_t *out_cur = gdbmi_out_ptr;
+	oob_record_t *oob_cur;
 	char *str;
 
-	while (cur) {
-		if (cur->rtype == STREAM_RECORD &&
-		    cur->r.stream_rec_ptr->stype == CONSOLE_STREAM) {
-			str = convert_cstr_to_str(cur->r.stream_rec_ptr->cstr);
-			printf("%s", str);
-			free(str);
+	do {
+		oob_cur = out_cur->oob_rec_ptr;
+		while (oob_cur) {
+			if (oob_cur->rtype == STREAM_RECORD &&
+			    oob_cur->r.stream_rec_ptr->stype == CONSOLE_STREAM) {
+				stream_record_t *s = oob_cur->r.stream_rec_ptr;
+				str = convert_cstr_to_str(s->cstr);
+				printf("%s", str);
+				free(str);
+			}
+			oob_cur = oob_cur->next;
 		}
-		cur = cur->next;
-	}
+		out_cur = out_cur->next;
+	} while (out_cur);
 }

@@ -21,6 +21,7 @@ extern char *yytext;
 	list_t *list_ptr;
 }
 
+%type <gdbmi_output_ptr> output_list
 %type <gdbmi_output_ptr> output
 %type <oob_record_ptr> oob_record_list
 %type <oob_record_ptr> oob_record
@@ -62,8 +63,11 @@ extern char *yytext;
 %token <char_ptr> TOKEN_CSTRING
 %token TOKEN_IDENTIFIER
 %%
+output_list:	output {gdbmi_out_ptr = $1;}
+	|	output_list output {$$ = append_gdbmi_output($1, $2);}
+;
 output: oob_record_list result_record_list TOKEN_GDB_PROMPT TOKEN_NEWLINE {
-	gdbmi_out_ptr = create_gdbmi_output($1, $2);
+	$$ = create_gdbmi_output($1, $2);
 }
 ;
 result_record_list: {$$ = NULL;}

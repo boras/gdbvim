@@ -199,6 +199,17 @@ oob_record_t *create_oob_record(record_type_t rtype, void *data)
 	return rec;
 }
 
+gdbmi_output_t *append_gdbmi_output(gdbmi_output_t *head, gdbmi_output_t *new)
+{
+	gdbmi_output_t *gout = head;
+
+	while (gout->next)
+		gout = gout->next;
+	gout->next = new;
+
+	return head;
+}
+
 gdbmi_output_t *create_gdbmi_output(oob_record_t *oob_rec_ptr,
 				    result_record_t *result_rec_ptr)
 {
@@ -502,18 +513,29 @@ void print_oob_record(oob_record_t *oob_rec_ptr)
 
 void destroy_gdbmi_output(void)
 {
-	if (gdbmi_out_ptr) {
-		destroy_oob_record(gdbmi_out_ptr->oob_rec_ptr);
-		destroy_result_record(gdbmi_out_ptr->result_rec_ptr);
-		free(gdbmi_out_ptr);
+	gdbmi_output_t *cur = gdbmi_out_ptr;
+	gdbmi_output_t *prev;
+
+	if (cur) {
+		do {
+			destroy_oob_record(cur->oob_rec_ptr);
+			destroy_result_record(cur->result_rec_ptr);
+			prev = cur;
+			cur = cur->next;
+			free(prev);
+		} while (cur);
 	}
 }
 
 void print_gdbmi_output(void)
 {
-	if (gdbmi_out_ptr) {
-		print_oob_record(gdbmi_out_ptr->oob_rec_ptr);
-		print_result_record(gdbmi_out_ptr->result_rec_ptr);
+	gdbmi_output_t *cur = gdbmi_out_ptr;
+
+	if (cur) {
+		do {
+			print_oob_record(cur->oob_rec_ptr);
+			print_result_record(cur->result_rec_ptr);
+		} while (cur = cur->next);
 	}
 }
 

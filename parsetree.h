@@ -113,6 +113,7 @@ typedef struct result_record {
 typedef struct gdbmi_output {
 	oob_record_t *oob_rec_ptr;
 	result_record_t *result_rec_ptr;
+	struct gdbmi_output *next;
 } gdbmi_output_t;
 
 /* Global definitions */
@@ -166,6 +167,7 @@ void print_oob_record(oob_record_t *oob_rec_ptr);
 
 gdbmi_output_t *create_gdbmi_output(oob_record_t *oob_rec_ptr,
 				    result_record_t *result_rec_ptr);
+gdbmi_output_t *append_gdbmi_output(gdbmi_output_t *head, gdbmi_output_t *new);
 void destroy_gdbmi_output(void);
 void print_gdmi_output(void);
 
