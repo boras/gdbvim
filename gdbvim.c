@@ -96,7 +96,6 @@ int main_loop(int ptym)
 			 * signs.
 			 */
 			nread = read(fds[1].fd, buf_ptr, BUFFER_SIZE);
-			printf("nread = %d\n", nread);
 			/*
 			 * Before giving the buffer for parsing, we must
 			 * ensure that it contains valid gdb/mi output.
@@ -110,15 +109,14 @@ int main_loop(int ptym)
 			 * placed.
 			 */
 			if (!strncmp(&buf_ptr[nread - 7], "(gdb) \n", 7)) {
-				printf("\nraw_begin\n");
 				/*
-				 * It covers two situation: If the last block
-				 * or the only block is (gdb) \n.
+				 * It covers two situation: If the last or
+				 * the only block is (gdb) \n.
 				 */
 				nread_total += nread;
-				write(STDIN_FILENO, buf, nread_total);
-				printf("\nraw_end\n\n");
-
+				/* Output is logged for debugging purposes */
+				if (logger(buf, nread_total, 1) < 0)
+					return -1;
 				/* Scanner expects a null terminated string */
 				buf[nread_total] = '\0';
 				parse_mi_output(buf);

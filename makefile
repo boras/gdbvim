@@ -1,8 +1,9 @@
+CC=gcc
 CFLAGS=-g
 LIBS=-lutil
 INCLUDES=
 YFLAGS=-d
-objs=lex.yy.o grammar.tab.o parsetree.o parser.o
+objs=lex.yy.o grammar.tab.o parsetree.o parser.o log.o
 
 all: gdbvim parser
 

@@ -3,6 +3,8 @@
 #include <string.h>
 #include "parser.h"
 
+extern int logger(const char *buf, int nread, int raw_io);
+
 frame_info_t *alloc_frame_info(void)
 {
 	frame_info_t *f;
@@ -130,11 +132,28 @@ static char *mi_get_val_cstr(value_t *val_ptr)
 /* For debugging purposes */
 void mi_print_frame_info(frame_info_t *finfo_ptr)
 {
+	char str[128];
+
 	printf("addr: %s\n", finfo_ptr->addr);
+	sprintf(str, "addr: %s\n", finfo_ptr->addr);
+	logger(str, strlen(str), 0);
+
 	printf("func: %s\n", finfo_ptr->func);
+	sprintf(str, "func: %s\n", finfo_ptr->func);
+	logger(str, strlen(str), 0);
+
 	printf("file: %s\n", finfo_ptr->file);
+	sprintf(str, "file: %s\n", finfo_ptr->file);
+	logger(str, strlen(str), 0);
+
 	printf("fullname: %s\n", finfo_ptr->fullname);
+	sprintf(str, "fullname: %s\n", finfo_ptr->fullname);
+	logger(str, strlen(str), 0);
+
 	printf("line: %s\n", finfo_ptr->line);
+	sprintf(str, "line: %s\n", finfo_ptr->line);
+	logger(str, strlen(str), 0);
+
 }
 
 /*
@@ -234,6 +253,7 @@ void mi_print_console_stream(gdbmi_output_t *gdbmi_out_ptr)
 				stream_record_t *s = oob_cur->r.stream_rec_ptr;
 				str = convert_cstr_to_str(s->cstr);
 				printf("%s", str);
+				logger(str, strlen(str), 0);
 				free(str);
 			}
 			oob_cur = oob_cur->next;
