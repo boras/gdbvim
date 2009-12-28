@@ -1,0 +1,7 @@
+*.o
+*.swp
+grammar.tab.c
+grammar.tab.h
+lex.yy.c
+gdbvim
+parser
