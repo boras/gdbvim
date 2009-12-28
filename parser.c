@@ -129,6 +129,22 @@ static char *mi_get_val_cstr(value_t *val_ptr)
 	return convert_cstr_to_str(val_ptr->data.cstr);
 }
 
+char *mi_get_error_result_record(gdbmi_output_t *gdbmi_out_ptr)
+{
+	result_record_t *rr = gdbmi_out_ptr->result_rec_ptr;
+
+	if (rr && rr->rclass == RESULT_ERROR) {
+		result_t *r = rr->result_ptr;
+		if (!strcmp(r->identifier, "msg"))
+			return convert_cstr_to_str(r->val_ptr->data.cstr);
+		else
+			fprintf(stderr, "Unknown error message\n");
+
+	}
+
+	return NULL;
+}
+
 /* For debugging purposes */
 void mi_print_frame_info(frame_info_t *finfo_ptr)
 {

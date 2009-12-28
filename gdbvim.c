@@ -16,20 +16,24 @@ extern YY_BUFFER_STATE yy_scan_string(const char *yy_str);
 extern void yy_delete_buffer(YY_BUFFER_STATE b);
 extern void yy_flush_buffer(YY_BUFFER_STATE b);
 
-void parse_mi_output(char *str)
+void print_mi_output(void)
 {
-	YY_BUFFER_STATE scanner_state;
+	async_record_t *async_rec_ptr;
+	frame_info_t *finfo_ptr;
+	char *str;
 
-	scanner_state = yy_scan_string(str);
-
-	/* Start parsing */
-	yyparse();
-
-	/* Check if there is a valid gdb/mi output */
-	if (gdbmi_out_ptr) {
-		async_record_t *async_rec_ptr;
-		frame_info_t *finfo_ptr;
-
+	/*
+	 * FIXME: DONE should be handled. Others; EXIT, CONNECTED,
+	 * and RUNNING do not have any value(s).
+	 */
+	/* Check if there is error result record */
+	if (str = mi_get_error_result_record(gdbmi_out_ptr)) {
+		printf("%s\n", str);
+		logger(str, strlen(str), 0);
+		logger("\n", 1, 0);
+		free(str);
+	}
+	else {
 		/* Print console stream messages */
 		mi_print_console_stream(gdbmi_out_ptr);
 		/* Frame information is retrieved from exec async record */
@@ -38,13 +42,21 @@ void parse_mi_output(char *str)
 			mi_print_frame_info(finfo_ptr);
 			free_frame_info(finfo_ptr);
 		}
-		else
-			printf("There is no exec async record\n");
-		/*
-		 * FIXME: ERROR should be handled. It has an associated
-		 * var=cstring. Others, EXIT,CONNECTED, and RUNNING do
-		 * not have var=value pairs.
-		 */
+	}
+}
+
+void parse_mi_output(char *str)
+{
+	YY_BUFFER_STATE bufstate;
+
+	bufstate = yy_scan_string(str);
+
+	/* Start parsing */
+	yyparse();
+
+	/* Check if there is a valid gdb/mi output */
+	if (gdbmi_out_ptr) {
+		print_mi_output();
 		destroy_gdbmi_output();
 		gdbmi_out_ptr = NULL;
 	}
@@ -52,7 +64,7 @@ void parse_mi_output(char *str)
 		printf("Partial or wrong gdbmi output. Syntax or "
 		       "grammar problem?\n");
 
-	yy_delete_buffer(scanner_state);
+	yy_delete_buffer(bufstate);
 }
 
 int main_loop(int ptym)
@@ -120,6 +132,8 @@ int main_loop(int ptym)
 				/* Scanner expects a null terminated string */
 				buf[nread_total] = '\0';
 				parse_mi_output(buf);
+				/* gdb prompt */
+				write(STDIN_FILENO, "(gdb) ", 6);
 				/* Reset the buffer head */
 				buf_ptr = buf;
 				nread_total = 0;
