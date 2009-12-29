@@ -6,9 +6,14 @@
 #include <getopt.h>
 #include <stdlib.h>
 #include <termios.h>
-#include "parser.h"
+#include <signal.h>
+#include "gdbvim.h"
 
-#define BUFFER_SIZE	1024
+/* Symbolic constants */
+#define IN_BUF_SIZE	256
+#define GDB_BUF_SIZE	1024
+#define PROG_BUF_SIZE	1024
+#define GDB_CMD_SIZE	256
 
 /* Extern declarations */
 typedef struct yy_buffer_state *YY_BUFFER_STATE;
@@ -67,24 +72,34 @@ void parse_mi_output(char *str)
 	yy_delete_buffer(bufstate);
 }
 
-int main_loop(int ptym)
+int main_loop(gdbvim_t *gv_h)
 {
-	char buf[BUFFER_SIZE];
-	char *buf_ptr = buf;
-	struct pollfd fds[2];
+	char inbuf[IN_BUF_SIZE];
+	char gdbbuf[GDB_BUF_SIZE];
+	char progbuf[PROG_BUF_SIZE];
+	char gdb_cmd[GDB_CMD_SIZE];
+	struct pollfd fds[3];
+	char *gdbbuf_ptr = gdbbuf;
 	int nread, nread_total = 0;
 	int ret;
 
 	/* The descriptors to be listened */
 	fds[0].fd = STDIN_FILENO;
 	fds[0].events = POLLIN;
-	fds[1].fd = ptym;
+	fds[1].fd = gv_h->gdb_ptym;
 	fds[1].events = POLLIN;
+	fds[2].fd = gv_h->prog_ptym;
+	fds[2].events = POLLIN;
+
+	/* Tell gdb to use prog_ptys for program output */
+	sprintf(gdb_cmd, "set inferior-tty %s\n", ptsname(gv_h->prog_ptys));
+	/*printf("gdb_cmd = %s", gdb_cmd);*/
+	write(gv_h->gdb_ptym, gdb_cmd, strlen(gdb_cmd));
 
 	/* The main loop */
 	while (1) {
 		/* Wait for indefinetely */
-		if ((ret = poll(fds, 2, -1)) <= 0) {
+		if ((ret = poll(fds, 3, -1)) <= 0) {
 			fprintf(stderr, "Poll error\n");
 			perror(__FUNCTION__);
 			return ret;
@@ -96,8 +111,8 @@ int main_loop(int ptym)
 			 * Afterwards they are converted to gdb/mi input
 			 * commands.
 			 */
-			nread = read(fds[0].fd, buf, BUFFER_SIZE);
-			write(ptym, buf, nread);
+			nread = read(fds[0].fd, inbuf, IN_BUF_SIZE);
+			write(gv_h->gdb_ptym, inbuf, nread);
 		}
 		if (fds[1].revents == POLLIN) {
 			/*
@@ -107,7 +122,7 @@ int main_loop(int ptym)
 			 * Vim show the file and line in question by using
 			 * signs.
 			 */
-			nread = read(fds[1].fd, buf_ptr, BUFFER_SIZE);
+			nread = read(fds[1].fd, gdbbuf_ptr, GDB_BUF_SIZE);
 			/*
 			 * Before giving the buffer for parsing, we must
 			 * ensure that it contains valid gdb/mi output.
@@ -120,30 +135,36 @@ int main_loop(int ptym)
 			 * in the documentation but we verified that it is
 			 * placed.
 			 */
-			if (!strncmp(&buf_ptr[nread - 7], "(gdb) \n", 7)) {
+			if (!strncmp(&gdbbuf_ptr[nread - 7], "(gdb) \n", 7)) {
 				/*
 				 * It covers two situation: If the last or
 				 * the only block is (gdb) \n.
 				 */
 				nread_total += nread;
 				/* Output is logged for debugging purposes */
-				if (logger(buf, nread_total, 1) < 0)
+				if (logger(gdbbuf, nread_total, 1) < 0)
 					return -1;
 				/* Scanner expects a null terminated string */
-				buf[nread_total] = '\0';
-				parse_mi_output(buf);
-				/* gdb prompt */
-				write(STDIN_FILENO, "(gdb) ", 6);
+				gdbbuf[nread_total] = '\0';
+				parse_mi_output(gdbbuf);
+				/*[> gdb prompt <]*/
+				/*write(STDIN_FILENO, "(gdb) ", 6);*/
 				/* Reset the buffer head */
-				buf_ptr = buf;
+				gdbbuf_ptr = gdbbuf;
 				nread_total = 0;
 			}
 			else {
 				/* gdb/mi output are accumulated */
-				buf_ptr += nread;
+				gdbbuf_ptr += nread;
 				nread_total += nread;
 			}
 		}
+		if (fds[2].revents == POLLIN) {
+			nread = read(fds[2].fd, progbuf, PROG_BUF_SIZE);
+			write(STDOUT_FILENO, progbuf, nread);
+		}
+		/* gdb prompt */
+		write(STDIN_FILENO, "(gdb) ", 6);
 	}
 
 	return 0;
@@ -221,7 +242,7 @@ static int parse_args(int argc, char *argv[])
 
 int main(int argc, char *argv[])
 {
-	int ptym, pid;
+	gdbvim_t *gv_h;
 	struct termios stermios;
 	int ret = 0;
 
@@ -230,14 +251,21 @@ int main(int argc, char *argv[])
 	if (ret < 0)
 		return -1;
 
-	/* Child is created with a pseudo controlling terminal */
-	pid = forkpty(&ptym, NULL, NULL, NULL);
-	if (pid < 0) {
-		fprintf(stderr, "Cannot fork\n");
-		perror(__FUNCTION__);
+	/* Allocate the handle */
+	if (!(gv_h = (gdbvim_t *)malloc(sizeof(gdbvim_t)))) {
+		fprintf(stderr, "Cannot allocate memory\n");
 		return -1;
 	}
-	else if (pid == 0) {	/* Child */
+
+	/* Child is created with a pseudo controlling terminal */
+	gv_h->gdb_pid = forkpty(&gv_h->gdb_ptym, NULL, NULL, NULL);
+	if (gv_h->gdb_pid < 0) {
+		fprintf(stderr, "Cannot fork\n");
+		perror(__FUNCTION__);
+		goto err_out1;
+		return -1;
+	}
+	else if (gv_h->gdb_pid == 0) {	/* Child */
 		tcgetattr(STDIN_FILENO, &stermios);
 		/* Turn echo'ing off */
 		stermios.c_lflag &= ~(ECHO | ECHOE | ECHOK | ECHONL);
@@ -247,9 +275,26 @@ int main(int argc, char *argv[])
 
 		execlp(gdb_bin_name, gdb_bin_name, "--interpreter=mi", NULL);
 	}
-
 	/* Parent */
-	main_loop(ptym); /* Copies stdin -> ptym, ptym -> stdin */
+
+	/* Pseudo terminal for the program being debugged */
+	ret = openpty(&gv_h->prog_ptym, &gv_h->prog_ptys, NULL, NULL, NULL);
+	if (ret < 0) {
+		fprintf(stderr, "No pseudo tty left\n");
+		goto err_out2;
+		return -1;
+	}
+	/*
+	 * Copies
+	 *	stdin -> gdb_ptym or prog_ptym,
+	 *	gdb_ptym or prog_ptym -> stdout
+	 */
+	main_loop(gv_h);
+
+err_out2:
+	kill(gv_h->gdb_pid, SIGTERM);
+err_out1:
+	free(gv_h);
 
 	return 0;
 }
