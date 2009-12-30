@@ -150,26 +150,25 @@ void mi_print_frame_info(frame_info_t *finfo_ptr)
 {
 	char str[128];
 
-	printf("addr: %s\n", finfo_ptr->addr);
+	printf("addr:%s, ", finfo_ptr->addr);
 	sprintf(str, "addr: %s\n", finfo_ptr->addr);
 	logger(str, strlen(str), 0);
 
-	printf("func: %s\n", finfo_ptr->func);
-	sprintf(str, "func: %s\n", finfo_ptr->func);
+	printf("func:%s, ", finfo_ptr->func);
+	sprintf(str, "func:%s\n", finfo_ptr->func);
 	logger(str, strlen(str), 0);
 
-	printf("file: %s\n", finfo_ptr->file);
-	sprintf(str, "file: %s\n", finfo_ptr->file);
+	printf("file:%s, ", finfo_ptr->file);
+	sprintf(str, "file:%s\n", finfo_ptr->file);
 	logger(str, strlen(str), 0);
 
-	printf("fullname: %s\n", finfo_ptr->fullname);
-	sprintf(str, "fullname: %s\n", finfo_ptr->fullname);
+	printf("fullname:%s, ", finfo_ptr->fullname);
+	sprintf(str, "fullname:%s\n", finfo_ptr->fullname);
 	logger(str, strlen(str), 0);
 
-	printf("line: %s\n", finfo_ptr->line);
+	printf("line:%s\n", finfo_ptr->line);
 	sprintf(str, "line: %s\n", finfo_ptr->line);
 	logger(str, strlen(str), 0);
-
 }
 
 /*

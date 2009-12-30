@@ -14,6 +14,7 @@
 #define GDB_BUF_SIZE	1024
 #define PROG_BUF_SIZE	1024
 #define GDB_CMD_SIZE	256
+#define GDB_ARGS_SIZE	64
 
 /* Extern declarations */
 typedef struct yy_buffer_state *YY_BUFFER_STATE;
@@ -21,7 +22,7 @@ extern YY_BUFFER_STATE yy_scan_string(const char *yy_str);
 extern void yy_delete_buffer(YY_BUFFER_STATE b);
 extern void yy_flush_buffer(YY_BUFFER_STATE b);
 
-void print_mi_output(void)
+gdb_mi_cmd_state_t parse_mi_parsetree(void)
 {
 	async_record_t *async_rec_ptr;
 	frame_info_t *finfo_ptr;
@@ -37,39 +38,109 @@ void print_mi_output(void)
 		logger(str, strlen(str), 0);
 		logger("\n", 1, 0);
 		free(str);
+		return GDB_MI_CMD_COMPLETED;
 	}
 	else {
 		/* Print console stream messages */
 		mi_print_console_stream(gdbmi_out_ptr);
 		/* Frame information is retrieved from exec async record */
 		if (async_rec_ptr = mi_get_exec_async_record(gdbmi_out_ptr)) {
+			/* Found */
 			finfo_ptr = mi_get_frame(async_rec_ptr);
 			mi_print_frame_info(finfo_ptr);
 			free_frame_info(finfo_ptr);
+			return GDB_MI_CMD_COMPLETED;
 		}
+		else /* We have not got it yet */
+			return GDB_MI_CMD_INCOMPLETED;
 	}
+
+	return GDB_MI_CMD_COMPLETED;
 }
 
-void parse_mi_output(char *str)
+int create_mi_parsetree(char *str)
 {
 	YY_BUFFER_STATE bufstate;
+	int ret;
 
 	bufstate = yy_scan_string(str);
 
-	/* Start parsing */
+	/* Start creating a parse tree */
 	yyparse();
 
 	/* Check if there is a valid gdb/mi output */
-	if (gdbmi_out_ptr) {
-		print_mi_output();
-		destroy_gdbmi_output();
-		gdbmi_out_ptr = NULL;
-	}
-	else
+	if (!gdbmi_out_ptr) {
 		printf("Partial or wrong gdbmi output. Syntax or "
 		       "grammar problem?\n");
+		ret = -1;
+	}
+	else
+		ret = 0;
 
 	yy_delete_buffer(bufstate);
+
+	return ret;
+}
+
+gdb_mi_cmd_state_t handle_mi_output(char *gdbbuf)
+{
+	gdb_mi_cmd_state_t mi_cmd_status;
+
+	if (!create_mi_parsetree(gdbbuf)) {
+		/* There is a valid parse tree */
+		mi_cmd_status = parse_mi_parsetree();
+		destroy_gdbmi_output();
+		gdbmi_out_ptr = NULL;
+
+		return mi_cmd_status;
+	}
+	/* Parse tree could not be created */
+
+	return GDB_MI_CMD_COMPLETED;
+}
+
+int get_mi_output(int ptym, char *gdbbuf)
+{
+	static int nread_total = 0;
+	int nread;
+	char *gdbbuf_ptr;
+
+	/*
+	 * Before giving the buffer for parsing, we must
+	 * ensure that it contains valid gdb/mi output.
+	 * If there ara some data and we pass it immediately
+	 * there is a high chance that it has not been
+	 * complete yet. So for every read we should compare
+	 * its last 7 characters to (gdb) \n. (gdb) \n
+	 * notation represents the end of gdb/mi output.
+	 * The space between ')' and '\n' is not mentioned
+	 * in the documentation but we verified that it is
+	 * placed.
+	 */
+	gdbbuf_ptr = gdbbuf + nread_total;
+	nread = read(ptym, gdbbuf_ptr, GDB_BUF_SIZE);
+	if (!strncmp(&gdbbuf_ptr[nread - 7], "(gdb) \n", 7)) {
+		/*
+		 * It covers two situation: If the last or
+		 * the only block is (gdb) \n.
+		 */
+		nread_total += nread;
+		/* Scanner expects a null terminated string */
+		gdbbuf[nread_total] = '\0';
+		/* Output is logged for debugging purposes */
+		if (logger(gdbbuf, nread_total, 1) < 0)
+			return -1;
+		/* Reset the buffer head */
+		nread_total = 0;
+
+		return 0;
+	}
+	else {
+		/* gdb/mi output are accumulated */
+		nread_total += nread;
+	}
+
+	return nread;
 }
 
 int main_loop(gdbvim_t *gv_h)
@@ -77,10 +148,11 @@ int main_loop(gdbvim_t *gv_h)
 	char inbuf[IN_BUF_SIZE];
 	char gdbbuf[GDB_BUF_SIZE];
 	char progbuf[PROG_BUF_SIZE];
-	char gdb_cmd[GDB_CMD_SIZE];
+	char gdb_cmd_buf[GDB_CMD_SIZE];
 	struct pollfd fds[3];
-	char *gdbbuf_ptr = gdbbuf;
-	int nread, nread_total = 0;
+	gdb_state_t gdbstatus = GDB_STATE_CLI;
+	gdb_cmd_type_t prev_cmd_type = GDB_CMD_CLI;
+	int nread;
 	int ret;
 
 	/* The descriptors to be listened */
@@ -90,11 +162,6 @@ int main_loop(gdbvim_t *gv_h)
 	fds[1].events = POLLIN;
 	fds[2].fd = gv_h->prog_ptym;
 	fds[2].events = POLLIN;
-
-	/* Tell gdb to use prog_ptys for program output */
-	sprintf(gdb_cmd, "set inferior-tty %s\n", ptsname(gv_h->prog_ptys));
-	/*printf("gdb_cmd = %s", gdb_cmd);*/
-	write(gv_h->gdb_ptym, gdb_cmd, strlen(gdb_cmd));
 
 	/* The main loop */
 	while (1) {
@@ -112,7 +179,27 @@ int main_loop(gdbvim_t *gv_h)
 			 * commands.
 			 */
 			nread = read(fds[0].fd, inbuf, IN_BUF_SIZE);
-			write(gv_h->gdb_ptym, inbuf, nread);
+			if (inbuf[0] == '-') { /* gdb/mi command */
+				inbuf[nread] = '\0';
+				sprintf(gdb_cmd_buf, "interpreter mi %s", inbuf);
+				prev_cmd_type = GDB_CMD_MI;
+				gdbstatus = GDB_STATE_MI;
+				write(gv_h->gdb_ptym,
+				      gdb_cmd_buf,
+				      strlen(gdb_cmd_buf));
+			}
+			else if (inbuf[0] == '\n') { /* previous command */
+				if (prev_cmd_type == GDB_CMD_MI)
+					gdbstatus = GDB_STATE_MI;
+				else
+					gdbstatus = GDB_STATE_CLI;
+				write(gv_h->gdb_ptym, inbuf, nread);
+			}
+			else { /* gdb/cli command */
+				prev_cmd_type = GDB_CMD_CLI;
+				gdbstatus = GDB_STATE_CLI;
+				write(gv_h->gdb_ptym, inbuf, nread);
+			}
 		}
 		if (fds[1].revents == POLLIN) {
 			/*
@@ -122,49 +209,25 @@ int main_loop(gdbvim_t *gv_h)
 			 * Vim show the file and line in question by using
 			 * signs.
 			 */
-			nread = read(fds[1].fd, gdbbuf_ptr, GDB_BUF_SIZE);
-			/*
-			 * Before giving the buffer for parsing, we must
-			 * ensure that it contains valid gdb/mi output.
-			 * If there ara some data and we pass it immediately
-			 * there is a high chance that it has not been
-			 * complete yet. So for every read we should compare
-			 * its last 7 characters to (gdb) \n. (gdb) \n
-			 * notation represents the end of gdb/mi output.
-			 * The space between ')' and '\n' is not mentioned
-			 * in the documentation but we verified that it is
-			 * placed.
-			 */
-			if (!strncmp(&gdbbuf_ptr[nread - 7], "(gdb) \n", 7)) {
-				/*
-				 * It covers two situation: If the last or
-				 * the only block is (gdb) \n.
-				 */
-				nread_total += nread;
-				/* Output is logged for debugging purposes */
-				if (logger(gdbbuf, nread_total, 1) < 0)
-					return -1;
-				/* Scanner expects a null terminated string */
-				gdbbuf[nread_total] = '\0';
-				parse_mi_output(gdbbuf);
-				/*[> gdb prompt <]*/
-				/*write(STDIN_FILENO, "(gdb) ", 6);*/
-				/* Reset the buffer head */
-				gdbbuf_ptr = gdbbuf;
-				nread_total = 0;
+			if (gdbstatus == GDB_STATE_CLI) {
+				nread = read(fds[1].fd, gdbbuf, GDB_BUF_SIZE);
+				write(STDOUT_FILENO, gdbbuf, nread);
 			}
-			else {
-				/* gdb/mi output are accumulated */
-				gdbbuf_ptr += nread;
-				nread_total += nread;
+			else { /* GDB_MI_STATE */
+				/* Get it as a block */
+				if (!get_mi_output(fds[1].fd, gdbbuf)) {
+					if (handle_mi_output(gdbbuf) ==
+					    GDB_MI_CMD_COMPLETED)
+						gdbstatus = GDB_STATE_CLI;
+					else
+						gdbstatus = GDB_STATE_MI;
+				}
 			}
 		}
 		if (fds[2].revents == POLLIN) {
 			nread = read(fds[2].fd, progbuf, PROG_BUF_SIZE);
 			write(STDOUT_FILENO, progbuf, nread);
 		}
-		/* gdb prompt */
-		write(STDIN_FILENO, "(gdb) ", 6);
 	}
 
 	return 0;
@@ -244,6 +307,7 @@ int main(int argc, char *argv[])
 {
 	gdbvim_t *gv_h;
 	struct termios stermios;
+	char gdb_args[GDB_ARGS_SIZE];
 	int ret = 0;
 
 	/* Before going further, parse arguments */
@@ -257,12 +321,29 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
+	//FIXME: Do we have to close an open pseudo terminal?
+	/* Pseudo terminal for the program being debugged */
+	ret = openpty(&gv_h->prog_ptym, &gv_h->prog_ptys, NULL, NULL, NULL);
+	if (ret < 0) {
+		fprintf(stderr, "No pseudo tty left\n");
+		goto err_out;
+		return -1;
+	}
+	/*
+	 * We pass prog_tty to gdb as an argument because it is
+	 * easy to handle. If we give it as a command right after
+	 * gdb is started, then gdb welcome msg and the answer to
+	 * this command is intermixed. gdb command prompt shows
+	 * this annoying output.
+	 */
+	sprintf(gdb_args, "--tty=%s", ptsname(gv_h->prog_ptys));
+
 	/* Child is created with a pseudo controlling terminal */
 	gv_h->gdb_pid = forkpty(&gv_h->gdb_ptym, NULL, NULL, NULL);
 	if (gv_h->gdb_pid < 0) {
 		fprintf(stderr, "Cannot fork\n");
 		perror(__FUNCTION__);
-		goto err_out1;
+		goto err_out;
 		return -1;
 	}
 	else if (gv_h->gdb_pid == 0) {	/* Child */
@@ -273,27 +354,19 @@ int main(int argc, char *argv[])
 		stermios.c_oflag &= ~(ONLCR);
 		tcsetattr(STDIN_FILENO, TCSANOW, &stermios);
 
-		execlp(gdb_bin_name, gdb_bin_name, "--interpreter=mi", NULL);
+		/*execlp(gdb_bin_name, gdb_bin_name, "--interpreter=mi", NULL);*/
+		execlp(gdb_bin_name, gdb_bin_name, gdb_args, NULL);
 	}
 	/* Parent */
 
-	/* Pseudo terminal for the program being debugged */
-	ret = openpty(&gv_h->prog_ptym, &gv_h->prog_ptys, NULL, NULL, NULL);
-	if (ret < 0) {
-		fprintf(stderr, "No pseudo tty left\n");
-		goto err_out2;
-		return -1;
-	}
 	/*
-	 * Copies
+	 * Direction of transfers:
 	 *	stdin -> gdb_ptym or prog_ptym,
-	 *	gdb_ptym or prog_ptym -> stdout
+	 *	stdout <- gdb_ptym or prog_ptym
 	 */
 	main_loop(gv_h);
 
-err_out2:
-	kill(gv_h->gdb_pid, SIGTERM);
-err_out1:
+err_out:
 	free(gv_h);
 
 	return 0;
