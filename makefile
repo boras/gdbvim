@@ -1,6 +1,6 @@
 CC=gcc
 CFLAGS=-g
-LIBS=-lutil
+LIBS=-lutil -lreadline
 INCLUDES=
 YFLAGS=-d
 objs=lex.yy.o grammar.tab.o parsetree.o parser.o log.o

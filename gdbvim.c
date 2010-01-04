@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <termios.h>
 #include <signal.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 #include "gdbvim.h"
 
 /* Symbolic constants */
@@ -147,50 +149,80 @@ int get_mi_output(int ptym, char *gdbbuf)
 static gdb_state_t gdbstatus = GDB_STATE_CLI;
 static int gdb_ptym;
 
-/* Skip whitespace(s) from the start of a string */
-char *skipws(char *str)
+/* Strip whitespace(s) from the start and end of a str */
+char *stripws(char *str)
 {
 	char *head = str;
+	char *tail = &str[strlen(str)];
 
-	/* "  \t\t return\n" */
-	while (*head == ' ' || *head == '\t' || *head == '\n')
+	/* If tab completion is active, str will not contain '\t' */
+	/* "  \t\t return  \t" */
+	while (*head == ' ' || *head == '\t')
 		head++;
+	if (*head == '\0') { /* head reached the end of the list */
+		/* Consists of only whitespace(s) */
+		return head;
+	}
+	while (*--tail == ' ' || *tail == '\t')
+		;
+
+	/* head points to 'r', tail points to 'n' */
+	*++tail = '\0';
 
 	return head;
 }
 
-void handle_gdb_input(char *inbuf)
+/* Called when EOF or newline is encountered */
+void handle_gdb_input(char *line)
 {
 	static gdb_cmd_type_t prev_cmd_type = GDB_CMD_CLI;
 	char gdb_cmd_buf[GDB_CMD_SIZE];
-	char *cmd_head;
-	int nread;
+	char *cmd;
 
-	nread = read(STDIN_FILENO, inbuf, IN_BUF_SIZE);
+	/* Check if it is EOF: C-d */
+	if (line) {
+		/*
+		 * Remove leading and trailing whitespace(s) from
+		 * the line. If there is anything left, add it to
+		 * the history list. It is also checked if only
+		 * newline is entered to prevent it from ending up
+		 * in the list.
+		 */
+		if (*line && *(cmd = stripws(line)))
+			add_history(cmd);
 
-	if (*inbuf == '\n') { /* previous command */
-		if (prev_cmd_type == GDB_CMD_MI)
+		/*
+		 * When readline library gives the line to the application,
+		 * it strips newline. However, gdb commands should be ended
+		 * with a newline so we set it again.
+		 */
+		if (!*line || !*cmd) { /* previous command */
+			/* readline gives: line = "" */
+			if (prev_cmd_type == GDB_CMD_MI)
+				gdbstatus = GDB_STATE_MI;
+			else
+				gdbstatus = GDB_STATE_CLI;
+			write(gdb_ptym, "\n", 1);
+		}
+		else if (*cmd == '-') { /* gdb/mi command */
+			/* readline gives: -exec-next'\0' */
+			prev_cmd_type = GDB_CMD_MI;
 			gdbstatus = GDB_STATE_MI;
-		else
+			sprintf(gdb_cmd_buf, "interpreter mi %s\n", cmd);
+			write(gdb_ptym, gdb_cmd_buf, strlen(gdb_cmd_buf));
+		}
+		else { /* gdb/cli command */
+			/* readline gives: line = next'\0' */
+			prev_cmd_type = GDB_CMD_CLI;
 			gdbstatus = GDB_STATE_CLI;
-		write(gdb_ptym, "\n", 1);
-		return;
-	}
+			sprintf(gdb_cmd_buf, "%s\n", cmd);
+			write(gdb_ptym, gdb_cmd_buf, strlen(gdb_cmd_buf));
+		}
 
-	/* skipws expects a null terminated string */
-	inbuf[nread] = '\0';
-	/* Skip leading whitespace(s) */
-	cmd_head = skipws(inbuf);
-	if (*cmd_head == '-') { /* gdb/mi command */
-		prev_cmd_type = GDB_CMD_MI;
-		gdbstatus = GDB_STATE_MI;
-		sprintf(gdb_cmd_buf, "interpreter mi %s", cmd_head);
-		write(gdb_ptym, gdb_cmd_buf, strlen(gdb_cmd_buf));
+		free(line);
 	}
-	else { /* gdb/cli command */
-		prev_cmd_type = GDB_CMD_CLI;
-		gdbstatus = GDB_STATE_CLI;
-		write(gdb_ptym, inbuf, nread);
+	else { /* EOF */
+		//FIXME: Handle EOF
 	}
 }
 
@@ -200,7 +232,7 @@ void handle_user_input(gdbvim_t *gv_h, char *inbuf)
 
 	/* gdb or prog input */
 	if (gdbstatus == GDB_STATE_CLI) /* input for gdb */
-		handle_gdb_input(inbuf);
+		rl_callback_read_char();
 	else { /* input for prog */
 		/*
 		 * The only possibility for a program to get input is the
@@ -377,6 +409,11 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
+	/* Initialize readline */
+	rl_bind_key('\t', rl_insert);
+	rl_already_prompted = 1;
+	rl_callback_handler_install("(gdb) ", handle_gdb_input);
+
 	//FIXME: Close an open pseudo terminal
 	/* Pseudo terminal for the program being debugged */
 	ret = openpty(&gv_h->prog_ptym, &gv_h->prog_ptys, NULL, NULL, NULL);
@@ -385,7 +422,15 @@ int main(int argc, char *argv[])
 		goto err_out;
 		return -1;
 	}
-	turn_echo_off(gv_h->prog_ptym);
+	/*
+	 * The below line is disabled because readline turns off gdbvim's
+	 * echo'ing. If the char goes to readline, there is no problem it
+	 * outputs. However, if it goes to program, unless the below line
+	 * is commented out, there is no way to see the entered characters
+	 * in the gdbvim display. We may change this in the future if a
+	 * different pseudo terminal is assigned to readline.
+	 */
+	/*turn_echo_off(gv_h->prog_ptym);*/
 	/*
 	 * We pass prog_tty to gdb as an argument because it is
 	 * easy to handle. If we give it as a command right after
