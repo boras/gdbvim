@@ -22,6 +22,7 @@ extern YY_BUFFER_STATE yy_scan_string(const char *yy_str);
 extern void yy_delete_buffer(YY_BUFFER_STATE b);
 extern void yy_flush_buffer(YY_BUFFER_STATE b);
 
+/* Function definitions */
 gdb_mi_cmd_state_t parse_mi_parsetree(void)
 {
 	async_record_t *async_rec_ptr;
@@ -143,22 +144,89 @@ int get_mi_output(int ptym, char *gdbbuf)
 	return nread;
 }
 
+static gdb_state_t gdbstatus = GDB_STATE_CLI;
+static int gdb_ptym;
+
+/* Skip whitespace(s) from the start of a string */
+char *skipws(char *str)
+{
+	char *head = str;
+
+	/* "  \t\t return\n" */
+	while (*head == ' ' || *head == '\t' || *head == '\n')
+		head++;
+
+	return head;
+}
+
+void handle_gdb_input(char *inbuf)
+{
+	static gdb_cmd_type_t prev_cmd_type = GDB_CMD_CLI;
+	char gdb_cmd_buf[GDB_CMD_SIZE];
+	char *cmd_head;
+	int nread;
+
+	nread = read(STDIN_FILENO, inbuf, IN_BUF_SIZE);
+
+	if (*inbuf == '\n') { /* previous command */
+		if (prev_cmd_type == GDB_CMD_MI)
+			gdbstatus = GDB_STATE_MI;
+		else
+			gdbstatus = GDB_STATE_CLI;
+		write(gdb_ptym, "\n", 1);
+		return;
+	}
+
+	/* skipws expects a null terminated string */
+	inbuf[nread] = '\0';
+	/* Skip leading whitespace(s) */
+	cmd_head = skipws(inbuf);
+	if (*cmd_head == '-') { /* gdb/mi command */
+		prev_cmd_type = GDB_CMD_MI;
+		gdbstatus = GDB_STATE_MI;
+		sprintf(gdb_cmd_buf, "interpreter mi %s", cmd_head);
+		write(gdb_ptym, gdb_cmd_buf, strlen(gdb_cmd_buf));
+	}
+	else { /* gdb/cli command */
+		prev_cmd_type = GDB_CMD_CLI;
+		gdbstatus = GDB_STATE_CLI;
+		write(gdb_ptym, inbuf, nread);
+	}
+}
+
+void handle_user_input(gdbvim_t *gv_h, char *inbuf)
+{
+	int nread;
+
+	/* gdb or prog input */
+	if (gdbstatus == GDB_STATE_CLI) /* input for gdb */
+		handle_gdb_input(inbuf);
+	else { /* input for prog */
+		/*
+		 * The only possibility for a program to get input is the
+		 * state of already being run, and a program is
+		 * in that condition only if execution control commands
+		 * are being executed. That means that gdb must be operating
+		 * in the mi state.
+		 */
+		nread = read(STDIN_FILENO, inbuf, IN_BUF_SIZE);
+		write(gv_h->prog_ptym, inbuf, nread);
+	}
+}
+
 int main_loop(gdbvim_t *gv_h)
 {
 	char inbuf[IN_BUF_SIZE];
 	char gdbbuf[GDB_BUF_SIZE];
 	char progbuf[PROG_BUF_SIZE];
-	char gdb_cmd_buf[GDB_CMD_SIZE];
 	struct pollfd fds[3];
-	gdb_state_t gdbstatus = GDB_STATE_CLI;
-	gdb_cmd_type_t prev_cmd_type = GDB_CMD_CLI;
 	int nread;
 	int ret;
 
 	/* The descriptors to be listened */
 	fds[0].fd = STDIN_FILENO;
 	fds[0].events = POLLIN;
-	fds[1].fd = gv_h->gdb_ptym;
+	fds[1].fd = gdb_ptym;
 	fds[1].events = POLLIN;
 	fds[2].fd = gv_h->prog_ptym;
 	fds[2].events = POLLIN;
@@ -173,37 +241,16 @@ int main_loop(gdbvim_t *gv_h)
 		}
 		if (fds[0].revents == POLLIN) {
 			/*
-			 * pseudo gdb/cli interface. Commands are read by
+			 * gdb/cli or prog input. Commands are read by
 			 * readline library. Tab completion should be there.
 			 * Afterwards they are converted to gdb/mi input
 			 * commands.
 			 */
-			nread = read(fds[0].fd, inbuf, IN_BUF_SIZE);
-			if (inbuf[0] == '-') { /* gdb/mi command */
-				inbuf[nread] = '\0';
-				sprintf(gdb_cmd_buf, "interpreter mi %s", inbuf);
-				prev_cmd_type = GDB_CMD_MI;
-				gdbstatus = GDB_STATE_MI;
-				write(gv_h->gdb_ptym,
-				      gdb_cmd_buf,
-				      strlen(gdb_cmd_buf));
-			}
-			else if (inbuf[0] == '\n') { /* previous command */
-				if (prev_cmd_type == GDB_CMD_MI)
-					gdbstatus = GDB_STATE_MI;
-				else
-					gdbstatus = GDB_STATE_CLI;
-				write(gv_h->gdb_ptym, inbuf, nread);
-			}
-			else { /* gdb/cli command */
-				prev_cmd_type = GDB_CMD_CLI;
-				gdbstatus = GDB_STATE_CLI;
-				write(gv_h->gdb_ptym, inbuf, nread);
-			}
+			handle_user_input(gv_h, inbuf);
 		}
 		if (fds[1].revents == POLLIN) {
 			/*
-			 * gdb/mi output. Two things should be done.
+			 * gdb output. Two things should be done.
 			 * 1. gdb/mi output is converted to the gdb/cli form.
 			 * 2. file and line information is obtained to have
 			 * Vim show the file and line in question by using
@@ -224,7 +271,7 @@ int main_loop(gdbvim_t *gv_h)
 				}
 			}
 		}
-		if (fds[2].revents == POLLIN) {
+		if (fds[2].revents == POLLIN) { /* prog output */
 			nread = read(fds[2].fd, progbuf, PROG_BUF_SIZE);
 			write(STDOUT_FILENO, progbuf, nread);
 		}
@@ -299,8 +346,17 @@ static int parse_args(int argc, char *argv[])
 		return 0;
 	}
 
-
 	return 0;
+}
+
+void turn_echo_off(int fd)
+{
+	struct termios stermios;
+
+	/* Turn echo'ing off */
+	tcgetattr(fd, &stermios);
+	stermios.c_lflag &= ~(ECHO | ECHOE | ECHOK | ECHONL);
+	tcsetattr(fd, TCSANOW, &stermios);
 }
 
 int main(int argc, char *argv[])
@@ -321,7 +377,7 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	//FIXME: Do we have to close an open pseudo terminal?
+	//FIXME: Close an open pseudo terminal
 	/* Pseudo terminal for the program being debugged */
 	ret = openpty(&gv_h->prog_ptym, &gv_h->prog_ptys, NULL, NULL, NULL);
 	if (ret < 0) {
@@ -329,6 +385,7 @@ int main(int argc, char *argv[])
 		goto err_out;
 		return -1;
 	}
+	turn_echo_off(gv_h->prog_ptym);
 	/*
 	 * We pass prog_tty to gdb as an argument because it is
 	 * easy to handle. If we give it as a command right after
@@ -339,7 +396,7 @@ int main(int argc, char *argv[])
 	sprintf(gdb_args, "--tty=%s", ptsname(gv_h->prog_ptys));
 
 	/* Child is created with a pseudo controlling terminal */
-	gv_h->gdb_pid = forkpty(&gv_h->gdb_ptym, NULL, NULL, NULL);
+	gv_h->gdb_pid = forkpty(&gdb_ptym, NULL, NULL, NULL);
 	if (gv_h->gdb_pid < 0) {
 		fprintf(stderr, "Cannot fork\n");
 		perror(__FUNCTION__);
@@ -347,10 +404,9 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 	else if (gv_h->gdb_pid == 0) {	/* Child */
-		tcgetattr(STDIN_FILENO, &stermios);
-		/* Turn echo'ing off */
-		stermios.c_lflag &= ~(ECHO | ECHOE | ECHOK | ECHONL);
+		turn_echo_off(STDIN_FILENO);
 		/* Turn NL -> CR/NL output mapping off */
+		tcgetattr(STDIN_FILENO, &stermios);
 		stermios.c_oflag &= ~(ONLCR);
 		tcsetattr(STDIN_FILENO, TCSANOW, &stermios);
 

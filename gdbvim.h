@@ -20,7 +20,6 @@ typedef enum gdb_state {
 
 typedef struct gdbvim {
 	pid_t gdb_pid;
-	int gdb_ptym;
 	int prog_ptym;	/* master */
 	int prog_ptys;	/* slave */
 } gdbvim_t;

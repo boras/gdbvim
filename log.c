@@ -19,4 +19,3 @@ int logger(const char *buf, int nread, int raw_io)
 
 	return 0;
 }
-
