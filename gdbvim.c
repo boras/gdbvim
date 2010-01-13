@@ -98,50 +98,6 @@ int create_mi_parsetree(char *str)
 	return ret;
 }
 
-int get_mi_output(char *gdbbuf)
-{
-	static int nread_total = 0;
-	int nread;
-	char *gdbbuf_ptr;
-
-	/*
-	 * Before giving the buffer for parsing, we must
-	 * ensure that it contains valid gdb/mi output.
-	 * If there ara some data and we pass it immediately
-	 * there is a high chance that it has not been
-	 * complete yet. So for every read we should compare
-	 * its last 7 characters to (gdb) \n. (gdb) \n
-	 * notation represents the end of gdb/mi output.
-	 * The space between ')' and '\n' is not mentioned
-	 * in the documentation but we verified that it is
-	 * placed.
-	 */
-	gdbbuf_ptr = gdbbuf + nread_total;
-	nread = read(gdb_ptym, gdbbuf_ptr, GDB_BUF_SIZE);
-	if (!strncmp(&gdbbuf_ptr[nread - 7], "(gdb) \n", 7)) {
-		/*
-		 * It covers two situation: If the last or
-		 * the only block is (gdb) \n.
-		 */
-		nread_total += nread;
-		/* Scanner expects a null terminated string */
-		gdbbuf[nread_total] = '\0';
-		/* Output is logged for debugging purposes */
-		if (logger(gdbbuf, nread_total, 1) < 0)
-			return -1;
-		/* Reset the buffer head */
-		nread_total = 0;
-
-		return 0;
-	}
-	else {
-		/* gdb/mi output are accumulated */
-		nread_total += nread;
-	}
-
-	return nread;
-}
-
 /* Strip whitespace(s) from the start and end of a str */
 char *stripws(char *str)
 {
@@ -290,6 +246,8 @@ gdb_cmd_mi_state_t handle_mi_output(char *gdbbuf)
 		ans_ptr = kill_echo(gdbbuf, 1);
 		gdb_out = GDB_OUT_ANS;
 	}
+	else
+		ans_ptr = gdbbuf;
 
 	if (!create_mi_parsetree(ans_ptr)) {
 		/* There is a valid parse tree */
@@ -306,19 +264,10 @@ gdb_cmd_mi_state_t handle_mi_output(char *gdbbuf)
 
 void handle_cli_output(char *gdbbuf)
 {
-	char *ans_ptr;
-	int nread;
+	char *ans_ptr = kill_echo(gdbbuf, 1);
 
-	nread = read(gdb_ptym, gdbbuf, GDB_BUF_SIZE);
-	gdbbuf[nread] = '\0';
-	ans_ptr = kill_echo(gdbbuf, 1);
-	if (ans_ptr != (gdbbuf + nread)) {
-		/* Comes here after echo'ing is cut */
-		nread -= ans_ptr - gdbbuf;
-		write(STDOUT_FILENO, ans_ptr, nread);
-	}
-	else
-		gdb_out = GDB_OUT_ANS;
+	write(STDOUT_FILENO, ans_ptr, strlen(ans_ptr));
+	gdb_out = GDB_OUT_ANS;
 }
 
 void handle_completion_by_tab_output(char *gdbbuf)
@@ -445,6 +394,39 @@ void handle_user_input(char *inbuf)
 	}
 }
 
+int get_gdb_output(char *gdbbuf, char *pattern)
+{
+	static int nread_total = 0;
+	int nread;
+	char *next_slice;
+	int plen = strlen(pattern);
+
+	next_slice = gdbbuf + nread_total;
+	nread = read(gdb_ptym, next_slice, GDB_BUF_SIZE);
+	if (!strncmp(&next_slice[nread - plen], pattern, plen)) {
+		/*
+		 * It covers two situation: If the last or
+		 * the only block is pattern.
+		 */
+		nread_total += nread;
+		/* null terminated */
+		gdbbuf[nread_total] = '\0';
+		/* logged for debugging purposes */
+		if (logger(gdbbuf, nread_total, 1) < 0)
+			return -1;
+		/* Reset the buffer head */
+		nread_total = 0;
+
+		return 0;
+	}
+	else {
+		/* gdb output is accumulated */
+		nread_total += nread;
+	}
+
+	return nread;
+}
+
 int main_loop(void)
 {
 	char inbuf[IN_BUF_SIZE];
@@ -507,13 +489,28 @@ int main_loop(void)
 			 * Vim show the file and line in question by using
 			 * signs.
 			 */
-			if (gdbstatus == GDB_STATE_CLI)
-				handle_cli_output(gdbbuf);
+			/*if (gdbstatus == GDB_STATE_CLI)*/
+				/*handle_cli_output(gdbbuf);*/
+			if (gdbstatus == GDB_STATE_CLI) {
+				if (!get_gdb_output(gdbbuf, "(gdb) "))
+					handle_cli_output(gdbbuf);
+			}
 			else if (gdbstatus == GDB_STATE_COMPLETION_BY_TAB)
 				handle_completion_by_tab_output(gdbbuf);
 			else { /* GDB_MI_STATE */
-				/* Get it as a block */
-				if (!get_mi_output(gdbbuf)) {
+				/*
+				 * Before giving the buffer for parsing, we must
+				 * ensure that it contains valid gdb/mi output.
+				 * If there ara some data and we pass it
+				 * immediately there is a high chance that it
+				 * has not been complete yet. So for every read
+				 * we should compare its last 7 characters to
+				 * (gdb) \n. (gdb) \n notation represents the
+				 * end of gdb/mi output. The space between ')'
+				 * and '\n' is not mentioned in the documentation
+				 * but we verified that it is there.
+				 */
+				if (!get_gdb_output(gdbbuf, "(gdb) \n")) {
 					if (handle_mi_output(gdbbuf) ==
 					    GDB_CMD_MI_COMPLETED)
 						gdbstatus = GDB_STATE_CLI;
