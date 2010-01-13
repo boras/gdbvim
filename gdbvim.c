@@ -98,7 +98,7 @@ int create_mi_parsetree(char *str)
 	return ret;
 }
 
-int get_mi_output(int ptym, char *gdbbuf)
+int get_mi_output(char *gdbbuf)
 {
 	static int nread_total = 0;
 	int nread;
@@ -117,7 +117,7 @@ int get_mi_output(int ptym, char *gdbbuf)
 	 * placed.
 	 */
 	gdbbuf_ptr = gdbbuf + nread_total;
-	nread = read(ptym, gdbbuf_ptr, GDB_BUF_SIZE);
+	nread = read(gdb_ptym, gdbbuf_ptr, GDB_BUF_SIZE);
 	if (!strncmp(&gdbbuf_ptr[nread - 7], "(gdb) \n", 7)) {
 		/*
 		 * It covers two situation: If the last or
@@ -262,6 +262,24 @@ static void erase_line(int fd)
 	write(fd, &c, 1);
 }
 
+int tab_completion(int count, int key)
+{
+	char gdb_cmd_buf[GDB_CMD_SIZE];
+	int nread;
+
+	if (prev_key == KEY_TAB)
+		write(gdb_ptym, "\t", 1);
+	else {
+		erase_line(gdb_ptym);
+		sprintf(gdb_cmd_buf, "%s\t", rl_line_buffer);
+		write(gdb_ptym, gdb_cmd_buf, strlen(gdb_cmd_buf));
+	}
+	gdbstatus = GDB_STATE_COMPLETION_BY_TAB;
+	prev_key = KEY_TAB;
+
+	return 0;
+}
+
 gdb_cmd_mi_state_t handle_mi_output(char *gdbbuf)
 {
 	gdb_cmd_mi_state_t mi_cmd_status;
@@ -303,25 +321,7 @@ void handle_cli_output(char *gdbbuf)
 		gdb_out = GDB_OUT_ANS;
 }
 
-int tab_completion(int count, int key)
-{
-	char gdb_cmd_buf[GDB_CMD_SIZE];
-	int nread;
-
-	if (prev_key == KEY_TAB)
-		write(gdb_ptym, "\t", 1);
-	else {
-		erase_line(gdb_ptym);
-		sprintf(gdb_cmd_buf, "%s\t", rl_line_buffer);
-		write(gdb_ptym, gdb_cmd_buf, strlen(gdb_cmd_buf));
-	}
-	gdbstatus = GDB_STATE_CLI_COMPLETION;
-	prev_key = KEY_TAB;
-
-	return 0;
-}
-
-void handle_complete_by_tab_output(char *gdbbuf)
+void handle_completion_by_tab_output(char *gdbbuf)
 {
 	char *char_ptr, *ans_ptr;
 	int nread;
@@ -509,11 +509,11 @@ int main_loop(void)
 			 */
 			if (gdbstatus == GDB_STATE_CLI)
 				handle_cli_output(gdbbuf);
-			else if (gdbstatus == GDB_STATE_CLI_COMPLETION)
-				handle_complete_by_tab_output(gdbbuf);
+			else if (gdbstatus == GDB_STATE_COMPLETION_BY_TAB)
+				handle_completion_by_tab_output(gdbbuf);
 			else { /* GDB_MI_STATE */
 				/* Get it as a block */
-				if (!get_mi_output(fds[1].fd, gdbbuf)) {
+				if (!get_mi_output(gdbbuf)) {
 					if (handle_mi_output(gdbbuf) ==
 					    GDB_CMD_MI_COMPLETED)
 						gdbstatus = GDB_STATE_CLI;

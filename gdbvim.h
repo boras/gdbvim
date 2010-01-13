@@ -25,7 +25,7 @@ typedef enum gdb_cmd_mi_state {
 
 typedef enum gdb_state {
 	GDB_STATE_CLI,
-	GDB_STATE_CLI_COMPLETION,
+	GDB_STATE_COMPLETION_BY_TAB,
 	GDB_STATE_MI
 } gdb_state_t;
 
