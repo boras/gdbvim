@@ -230,7 +230,7 @@ int tab_completion(int count, int key)
 		sprintf(gdb_cmd_buf, "%s\t", rl_line_buffer);
 		write(gdb_ptym, gdb_cmd_buf, strlen(gdb_cmd_buf));
 	}
-	gdbstatus = GDB_STATE_COMPLETION_BY_TAB;
+	gdbstatus = GDB_STATE_COMPLETION;
 	prev_key = KEY_TAB;
 
 	return 0;
@@ -270,7 +270,48 @@ void handle_cli_output(char *gdbbuf)
 	gdb_out = GDB_OUT_ANS;
 }
 
-void handle_completion_by_tab_output(char *gdbbuf)
+int parse_pre_cmd_output(char *cmd_list_buf, char **cmd)
+{
+	char *cmd_iter;
+	int cmd_len;
+
+	write(STDOUT_FILENO, cmd_list_buf, strlen(cmd_list_buf));
+
+	/* not a valid cmd: (gdb)[space] */
+	if (!(cmd_iter = strchr(cmd_list_buf, '\n')))
+		return 2;
+
+	cmd_iter++;
+
+	/* unambiguous cmd: break\n(gdb)[space] */
+	if (!strncmp(cmd_iter, "(gdb) ", 6)) {
+		cmd_len = cmd_iter - cmd_list_buf;
+		if (!(*cmd = (char *)malloc(cmd_len))) {
+			fprintf(stderr, "Cannot allocate memory\n");
+			return 3;
+		}
+		strncpy(*cmd, cmd_list_buf, cmd_len);
+		(*cmd)[cmd_len - 1] = '\0';
+		return 0;
+	}
+	/* ambiguous cmd: backtrace\nbreak\nbt\n(gdb)[space] */
+
+	return 1;
+}
+
+void handle_pre_cmd_output(char *gdbbuf)
+{
+	char *ans_ptr = kill_echo(gdbbuf, 1);
+	char *cmd;
+
+	if (!parse_pre_cmd_output(ans_ptr, &cmd))
+		free(cmd);
+
+	gdbstatus = GDB_STATE_CLI;
+	gdb_out = GDB_OUT_ANS;
+}
+
+void handle_completion_output(char *gdbbuf)
 {
 	char *char_ptr, *ans_ptr;
 	int nread;
@@ -489,15 +530,17 @@ int main_loop(void)
 			 * Vim show the file and line in question by using
 			 * signs.
 			 */
-			/*if (gdbstatus == GDB_STATE_CLI)*/
-				/*handle_cli_output(gdbbuf);*/
 			if (gdbstatus == GDB_STATE_CLI) {
 				if (!get_gdb_output(gdbbuf, "(gdb) "))
 					handle_cli_output(gdbbuf);
 			}
-			else if (gdbstatus == GDB_STATE_COMPLETION_BY_TAB)
-				handle_completion_by_tab_output(gdbbuf);
-			else { /* GDB_MI_STATE */
+			else if (gdbstatus == GDB_STATE_COMPLETION)
+				handle_completion_output(gdbbuf);
+			else if (gdbstatus == GDB_STATE_PRE_CMD) {
+				if (!get_gdb_output(gdbbuf, "(gdb) "))
+					handle_pre_cmd_output(gdbbuf);
+			}
+			else { /* GDB_STATE_MI */
 				/*
 				 * Before giving the buffer for parsing, we must
 				 * ensure that it contains valid gdb/mi output.

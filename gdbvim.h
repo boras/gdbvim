@@ -24,9 +24,10 @@ typedef enum gdb_cmd_mi_state {
 } gdb_cmd_mi_state_t;
 
 typedef enum gdb_state {
+	GDB_STATE_PRE_CMD,
 	GDB_STATE_CLI,
-	GDB_STATE_COMPLETION_BY_TAB,
-	GDB_STATE_MI
+	GDB_STATE_MI,
+	GDB_STATE_COMPLETION
 } gdb_state_t;
 
 typedef struct gdbvim {
