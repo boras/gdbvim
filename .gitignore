@@ -1,7 +1,8 @@
 *.o
 *.swp
-grammar.tab.c
-grammar.tab.h
-lex.yy.c
+mi_grammar.tab.c
+mi_grammar.tab.h
+mi_lex.yy.c
 gdbvim
-parser
+miparser
+miout.log
