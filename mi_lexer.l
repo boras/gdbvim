@@ -1,11 +1,13 @@
 %{
 /*
- * We have to insert "parser.h" here, otherwise bison %union declaration
- * does not see typedef declarations.
+ * We have to insert "mi_parser.h" here, otherwise bison %union
+ * declaration does not recognise typedef declarations.
  */
-#include "parsetree.h"
-#include "grammar.tab.h"
+#include "mi_parsetree.h"
+#include "mi_grammar.tab.h"
 %}
+
+%option outfile="mi_lex.yy.c"
 
 DIGITS			[0-9]+
 IDENTIFIER		[a-zA-Z_][a-zA-Z0-9_-]*

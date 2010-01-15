@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "parser.h"
+#include "mi_parser.h"
 
 extern int logger(const char *buf, int nread, int raw_io);
 

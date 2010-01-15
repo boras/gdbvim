@@ -1,7 +1,7 @@
 %{
 #include <stdio.h>
 #include <string.h>
-#include "parsetree.h"
+#include "mi_parsetree.h"
 extern char *yytext;
 %}
 
@@ -136,7 +136,7 @@ value:		cstring {$$ = create_value(CSTRING, $1);}
 tuple: 		'{' result_list '}' {$$ = $2 ? create_tuple($2) : NULL;}
 ;
 list:		'[' result_list ']' {$$ = $2 ? create_list(RESULT, $2) : NULL;}
-	|	'[' value_list ']' {$$ = $2 ? create_list(VALUE, $2) : NULL;} 
+	|	'[' value_list ']' {$$ = $2 ? create_list(VALUE, $2) : NULL;}
 ;
 identifier:	TOKEN_IDENTIFIER {$$ = strdup(yytext);}
 ;

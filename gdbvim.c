@@ -28,7 +28,7 @@ extern void yy_flush_buffer(YY_BUFFER_STATE b);
 /* static global variable defitions */
 static gdb_state_t gdbstatus = GDB_STATE_CLI;
 static key_type_t prev_key = KEY_OTHER;
-static int gdb_out = GDB_OUT_ANS;
+static int gdb_out = GDB_OUT_ECHO_TRIMMED;
 
 static int gdb_ptym;
 static int readline_ptym, readline_ptys;
@@ -38,7 +38,7 @@ static struct termios save_termios;
 static int gdb_cmd_len;
 
 /* Function definitions */
-gdb_cmd_mi_state_t parse_mi_parsetree(void)
+gdb_mi_cmd_state_t parse_mi_parsetree(void)
 {
 	async_record_t *async_rec_ptr;
 	frame_info_t *finfo_ptr;
@@ -54,7 +54,7 @@ gdb_cmd_mi_state_t parse_mi_parsetree(void)
 		logger(str, strlen(str), 0);
 		logger("\n", 1, 0);
 		free(str);
-		return GDB_CMD_MI_COMPLETED;
+		return GDB_MI_CMD_COMPLETED;
 	}
 	else {
 		/* Print console stream messages */
@@ -65,13 +65,13 @@ gdb_cmd_mi_state_t parse_mi_parsetree(void)
 			finfo_ptr = mi_get_frame(async_rec_ptr);
 			mi_print_frame_info(finfo_ptr);
 			free_frame_info(finfo_ptr);
-			return GDB_CMD_MI_COMPLETED;
+			return GDB_MI_CMD_COMPLETED;
 		}
 		else /* We have not got it yet */
-			return GDB_CMD_MI_INCOMPLETED;
+			return GDB_MI_CMD_INCOMPLETED;
 	}
 
-	return GDB_CMD_MI_COMPLETED;
+	return GDB_MI_CMD_COMPLETED;
 }
 
 int create_mi_parsetree(char *str)
@@ -203,7 +203,7 @@ static char *kill_echo(char *char_ptr, int cmd_echo)
 	if (!ans_ptr || !*ans_ptr)
 		ans_ptr = char_ptr;
 
-	if (cmd_echo && gdb_out == GDB_OUT_ECHO)
+	if (cmd_echo && gdb_out == GDB_OUT_ECHO_INCLUDED)
 		ans_ptr += gdb_cmd_len;
 
 	if (ans_ptr != char_ptr)
@@ -236,15 +236,15 @@ int tab_completion(int count, int key)
 	return 0;
 }
 
-gdb_cmd_mi_state_t handle_mi_output(char *gdbbuf)
+gdb_mi_cmd_state_t handle_mi_output(char *gdbbuf)
 {
-	gdb_cmd_mi_state_t mi_cmd_status;
+	gdb_mi_cmd_state_t mi_cmd_status;
 	char *ans_ptr;
 
-	if (gdb_out == GDB_OUT_ECHO) {
+	if (gdb_out == GDB_OUT_ECHO_INCLUDED) {
 		/* This means echo'ing will be cut */
 		ans_ptr = kill_echo(gdbbuf, 1);
-		gdb_out = GDB_OUT_ANS;
+		gdb_out = GDB_OUT_ECHO_TRIMMED;
 	}
 	else
 		ans_ptr = gdbbuf;
@@ -259,7 +259,7 @@ gdb_cmd_mi_state_t handle_mi_output(char *gdbbuf)
 	}
 	/* Parse tree could not be created */
 
-	return GDB_CMD_MI_COMPLETED;
+	return GDB_MI_CMD_COMPLETED;
 }
 
 void handle_cli_output(char *gdbbuf)
@@ -267,7 +267,7 @@ void handle_cli_output(char *gdbbuf)
 	char *ans_ptr = kill_echo(gdbbuf, 1);
 
 	write(STDOUT_FILENO, ans_ptr, strlen(ans_ptr));
-	gdb_out = GDB_OUT_ANS;
+	gdb_out = GDB_OUT_ECHO_TRIMMED;
 }
 
 int parse_pre_cmd_output(char *cmd_list_buf, char **cmd)
@@ -308,7 +308,7 @@ void handle_pre_cmd_output(char *gdbbuf)
 		free(cmd);
 
 	gdbstatus = GDB_STATE_CLI;
-	gdb_out = GDB_OUT_ANS;
+	gdb_out = GDB_OUT_ECHO_TRIMMED;
 }
 
 void handle_completion_output(char *gdbbuf)
@@ -401,7 +401,7 @@ void handle_gdb_input(char *line)
 			gdb_cmd_len = strlen(gdb_cmd_buf);
 			write(gdb_ptym, gdb_cmd_buf, gdb_cmd_len);
 		}
-		gdb_out = GDB_OUT_ECHO;
+		gdb_out = GDB_OUT_ECHO_INCLUDED;
 
 		free(line);
 	}
@@ -536,7 +536,7 @@ int main_loop(void)
 			}
 			else if (gdbstatus == GDB_STATE_COMPLETION)
 				handle_completion_output(gdbbuf);
-			else if (gdbstatus == GDB_STATE_PRE_CMD) {
+			else if (gdbstatus == GDB_STATE_CHECK_CMD) {
 				if (!get_gdb_output(gdbbuf, "(gdb) "))
 					handle_pre_cmd_output(gdbbuf);
 			}
@@ -555,7 +555,7 @@ int main_loop(void)
 				 */
 				if (!get_gdb_output(gdbbuf, "(gdb) \n")) {
 					if (handle_mi_output(gdbbuf) ==
-					    GDB_CMD_MI_COMPLETED)
+					    GDB_MI_CMD_COMPLETED)
 						gdbstatus = GDB_STATE_CLI;
 					else
 						gdbstatus = GDB_STATE_MI;

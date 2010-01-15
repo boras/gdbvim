@@ -3,23 +3,23 @@ CFLAGS=-g
 LIBS=-lutil -lreadline
 INCLUDES=
 YFLAGS=-d
-objs=lex.yy.o grammar.tab.o parsetree.o parser.o log.o
+objs=mi_lex.yy.o mi_grammar.tab.o mi_parsetree.o mi_parser.o log.o
 
-all: gdbvim parser
+all: gdbvim miparser
 
 gdbvim: $(objs) gdbvim.o
 	gcc $^ -o $@ $(CFLAGS) $(LIBS)
 
-parser: $(objs) mi_driver.o
+miparser: $(objs) mi_driver.o
 	gcc $^ -o $@ $(CFLAGS)
 
-grammar.tab.c: grammar.y
+mi_grammar.tab.c: mi_grammar.y
 	bison $(YFLAGS) $^
 
-lex.yy.c: lexer.l grammar.tab.c
-	flex lexer.l
+mi_lex.yy.c: mi_lexer.l mi_grammar.tab.c
+	flex mi_lexer.l
 
 clean:
 	- rm *.o
-	- rm lex.yy.c grammar.tab.c grammar.tab.h
-	- rm gdbvim parser
+	- rm mi_lex.yy.c mi_grammar.tab.c mi_grammar.tab.h
+	- rm gdbvim miparser

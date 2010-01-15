@@ -1,7 +1,7 @@
 #ifndef __GDBVIM_H__
 #define __GDBVIM_H__
 
-#include "parser.h"
+#include "mi_parser.h"
 
 typedef enum key_type {
 	KEY_TAB,
@@ -9,8 +9,8 @@ typedef enum key_type {
 } key_type_t;
 
 typedef enum gdb_out_type {
-	GDB_OUT_ECHO,
-	GDB_OUT_ANS
+	GDB_OUT_ECHO_INCLUDED,
+	GDB_OUT_ECHO_TRIMMED
 } gdb_out_type_t;
 
 typedef enum gdb_cmd_type {
@@ -18,13 +18,13 @@ typedef enum gdb_cmd_type {
 	GDB_CMD_MI
 } gdb_cmd_type_t;
 
-typedef enum gdb_cmd_mi_state {
-	GDB_CMD_MI_COMPLETED,
-	GDB_CMD_MI_INCOMPLETED,
-} gdb_cmd_mi_state_t;
+typedef enum gdb_mi_cmd_state {
+	GDB_MI_CMD_COMPLETED,
+	GDB_MI_CMD_INCOMPLETED,
+} gdb_mi_cmd_state_t;
 
 typedef enum gdb_state {
-	GDB_STATE_PRE_CMD,
+	GDB_STATE_CHECK_CMD,
 	GDB_STATE_CLI,
 	GDB_STATE_MI,
 	GDB_STATE_COMPLETION

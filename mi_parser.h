@@ -1,7 +1,7 @@
-#ifndef __PARSER_H__
-#define __PARSER_H__
+#ifndef __MI_PARSER_H__
+#define __MI_PARSER_H__
 
-#include "parsetree.h"
+#include "mi_parsetree.h"
 
 /* Frame information */
 typedef struct frame_info {
@@ -26,4 +26,4 @@ void mi_print_frame_info(frame_info_t *finfo_ptr);
 frame_info_t *alloc_frame_info(void);
 void free_frame_info(frame_info_t *finfo_ptr);
 
-#endif /* __PARSER_H__ */
+#endif /* __MI_PARSER_H__ */

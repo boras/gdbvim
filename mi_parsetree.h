@@ -1,5 +1,5 @@
-#ifndef __PARSETREE_H__
-#define __PARSETREE_H__
+#ifndef __MI_PARSETREE_H__
+#define __MI_PARSETREE_H__
 
 /* stream record messages */
 typedef enum stream_type {
@@ -109,7 +109,7 @@ typedef struct result_record {
 	result_t *result_ptr;
 } result_record_t;
 
-/* Consists of zero or more oob records and of zero or one result record */
+/* Consists of zero or more oob records and zero or one result record */
 typedef struct gdbmi_output {
 	oob_record_t *oob_rec_ptr;
 	result_record_t *result_rec_ptr;
@@ -171,4 +171,4 @@ gdbmi_output_t *append_gdbmi_output(gdbmi_output_t *head, gdbmi_output_t *new);
 void destroy_gdbmi_output(void);
 void print_gdmi_output(void);
 
-#endif /* __PARSETREE_H__ */
+#endif /* __MI_PARSETREE_H__ */
