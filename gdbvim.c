@@ -241,34 +241,6 @@ int tab_completion(int count, int key)
 	return 0;
 }
 
-char *parse_check_cmd_output(char *cmd_list_buf)
-{
-	char *cmd;
-	char *cmd_iter;
-	int cmd_len;
-
-	/* not a valid cmd: (gdb)[space] */
-	if (!(cmd_iter = strchr(cmd_list_buf, '\n')))
-		return NULL;
-
-	cmd_iter++;
-
-	/* unambiguous cmd: break\n(gdb)[space] */
-	if (!strncmp(cmd_iter, "(gdb) ", 6)) {
-		cmd_len = cmd_iter - cmd_list_buf;
-		if (!(cmd = (char *)malloc(cmd_len))) {
-			fprintf(stderr, "Cannot allocate memory\n");
-			return NULL;
-		}
-		strncpy(cmd, cmd_list_buf, cmd_len);
-		cmd[cmd_len - 1] = '\0';
-		return cmd;
-	}
-	/* ambiguous cmd: backtrace\nbreak\nbt\n(gdb)[space] */
-
-	return NULL;
-}
-
 void do_gdb_mi_cmd(gdb_mi_cmd_code_t mi_cmd_code)
 {
 	char gdb_cmd_buf[GDB_CMD_SIZE];
@@ -315,37 +287,81 @@ void do_gdb_mi_cmd(gdb_mi_cmd_code_t mi_cmd_code)
 	write(gdb_ptym, gdb_cmd_buf, gdb_cmd_len);
 }
 
+void tokenize_gdb_line(char *line, char **cmd, char **args)
+{
+	char *str = line;
+	int cmd_len;
+
+	/*
+	 * space and dot are separators.
+	 *
+	 * file ../../zero\0
+	 * file../../zero\0
+	 * continue\0
+	 */
+	while (*str != ' ' && *str != '.' && *str != '\0')
+		++str;
+	if (*str == '\0') {
+		*cmd = strdup(line);
+		*args = NULL;
+		return;
+	}
+
+	/* +1 because we need space for the null char */
+	cmd_len = str - line + 1;
+	if (!(*cmd = (char *)malloc(cmd_len))) {
+		fprintf(stderr, "Cannot allocate memory\n");
+		exit(EXIT_FAILURE);
+	}
+	strncpy(*cmd, line, cmd_len);
+	/* cmd_len - 1 is the last element */
+	(*cmd)[cmd_len - 1] = '\0';
+
+	if (*str == ' ')
+		++str;
+	*args = strdup(str);
+}
+
 /* Called when EOF or newline is encountered */
 void do_gdb_cmd(char *line)
 {
 	static gdb_cmd_type_t prev_cmd_type = GDB_CMD_CLI;
 	char gdb_cmd_buf[GDB_CMD_SIZE];
-	char *cmd;
 	const gdb_mi_cmd_t *mi_cmd_ptr;
+	char *stripped_line;
+	char *cmd = NULL, *args = NULL;
+	int cmd_len;
 
 	/* Check if it is EOF: C-d */
 	if (line) {
 		/*
-		 * Remove leading and trailing whitespace(s) from
-		 * the line. If there is anything left, add it to
-		 * the history list. It is also checked if only
-		 * newline is entered to prevent it from ending up
-		 * in the list.
+		 * Remove leading and trailing whitespace(s) from the line.
 		 *
-		 * line == "" means newline is entered -> cmd = ""
-		 * line == "  /t/t   " means all blank -> cmd = ""
+		 * line == ""	      means newline   -> stripped_line = ""
+		 * line == " /t/t   " means all blank -> stripped_line = ""
 		 */
-		if (*line && *(cmd = stripws(line)) &&
-		    gdbstatus != GDB_STATE_CHECK_CMD)
-			add_history(cmd);
+		if (*line && *(stripped_line = stripws(line))) {
+			/* Tokenize gdb line to cmd and args */
+			tokenize_gdb_line(stripped_line, &cmd, &args);
+			cmd_len = strlen(cmd);
+
+			/*
+			 * Command or more precisely line is added to the
+			 * history when it is first encountered. It may
+			 * come here second time after the command type
+			 * could not be decided but in this case it is not
+			 * added so as not to have duplicate entries.
+			 */
+			if (gdbstatus != GDB_STATE_CHECK_CMD)
+				add_history(stripped_line);
+		}
 
 		/*
 		 * When readline library gives the line to the application,
 		 * it strips newline. However, gdb commands should be ended
 		 * with a newline so we set it again.
 		 */
-		// FIXME: Why we need this?
-		if (!*line || !*cmd) { /* previous command */
+		if (!*line || !*stripped_line) { /* previous command */
 			/* readline gives: line = "" */
 			if (prev_cmd_type == GDB_CMD_MI)
 				gdbstatus = GDB_STATE_MI;
@@ -356,8 +372,7 @@ void do_gdb_cmd(char *line)
 			gdb_cmd_len = 1;
 			write(gdb_ptym, "\n", 1);
 		}
-		else if ((mi_cmd_ptr = is_gdb_mi_cmd(cmd, strlen(cmd)))
-			 != NULL) {
+		else if ((mi_cmd_ptr = is_gdb_mi_cmd(cmd, cmd_len)) != NULL) {
 			prev_cmd_type = GDB_CMD_MI;
 			gdbstatus = GDB_STATE_MI;
 			do_gdb_mi_cmd(mi_cmd_ptr->code);
@@ -371,7 +386,7 @@ void do_gdb_cmd(char *line)
 			 */
 			gdbstatus = GDB_STATE_CHECK_CMD;
 			erase_line(gdb_ptym);
-			current_gdb_line = strdup(cmd);
+			current_gdb_line = strdup(stripped_line);
 			sprintf(gdb_cmd_buf, "server complete %s\n", cmd);
 			gdb_cmd_len = strlen(gdb_cmd_buf);
 			write(gdb_ptym, gdb_cmd_buf, gdb_cmd_len);
@@ -381,17 +396,84 @@ void do_gdb_cmd(char *line)
 			prev_cmd_type = GDB_CMD_CLI;
 			gdbstatus = GDB_STATE_CLI;
 			erase_line(gdb_ptym);
-			sprintf(gdb_cmd_buf, "%s\n", cmd);
+			sprintf(gdb_cmd_buf, "%s\n", stripped_line);
 			gdb_cmd_len = strlen(gdb_cmd_buf);
 			write(gdb_ptym, gdb_cmd_buf, gdb_cmd_len);
 		}
 		gdb_out = GDB_OUT_ECHO_INCLUDED;
 
 		free(line);
+		if (cmd)
+			free(cmd);
+		if (args)
+			free(args);
 	}
 	else { /* EOF */
 		//FIXME: Handle EOF
 	}
+}
+
+void reconstruct_gdb_line(char *new_cmd)
+{
+	char *cmd, *args;
+	int cmd_len, args_len, new_cmd_len;
+
+	tokenize_gdb_line(current_gdb_line, &cmd, &args);
+
+	cmd_len = strlen(cmd);
+	new_cmd_len = strlen(new_cmd);
+
+	/*
+	 * If the new_cmd is the same as with the given one, then there
+	 * is no need to reconstruct current_gdb_line.
+	 */
+	if (new_cmd_len != cmd_len) {
+		free(current_gdb_line);
+		if (args)
+			args_len = strlen(args);
+		else {
+			args_len = 0;
+			args = "";
+		}
+		/* +2 for separator(space) and null char */
+		current_gdb_line = (char *)malloc(new_cmd_len + args_len + 2);
+		if (!current_gdb_line) {
+			fprintf(stderr, "Cannot allocate memory\n");
+			exit(EXIT_FAILURE);
+		}
+		sprintf(current_gdb_line, "%s %s", new_cmd, args);
+		free(cmd);
+		if (args && *args)
+			free(args);
+	}
+}
+
+char *parse_check_cmd_output(char *cmd_list_buf)
+{
+	char *cmd;
+	char *cmd_iter;
+	int cmd_len;
+
+	/* not a valid cmd: (gdb)[space] */
+	if (!(cmd_iter = strchr(cmd_list_buf, '\n')))
+		return NULL;
+
+	cmd_iter++;
+
+	/* unambiguous cmd: break\n(gdb)[space] */
+	if (!strncmp(cmd_iter, "(gdb) ", 6)) {
+		cmd_len = cmd_iter - cmd_list_buf;
+		if (!(cmd = (char *)malloc(cmd_len))) {
+			fprintf(stderr, "Cannot allocate memory\n");
+			return NULL;
+		}
+		strncpy(cmd, cmd_list_buf, cmd_len);
+		cmd[cmd_len - 1] = '\0';
+		return cmd;
+	}
+	/* ambiguous cmd: backtrace\nbreak\nbt\n(gdb)[space] */
+
+	return NULL;
 }
 
 gdb_mi_cmd_state_t handle_mi_output(char *gdbbuf)
@@ -434,9 +516,9 @@ void handle_check_cmd_output(char *gdbbuf)
 	char *completed_cmd = parse_check_cmd_output(ans_ptr);
 
 	if (completed_cmd)
-		do_gdb_cmd(completed_cmd);
-	else
-		do_gdb_cmd(current_gdb_line);
+		reconstruct_gdb_line(completed_cmd);
+
+	do_gdb_cmd(current_gdb_line);
 }
 
 void handle_completion_output(char *gdbbuf)
