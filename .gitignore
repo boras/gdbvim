@@ -3,6 +3,7 @@
 mi_grammar.tab.c
 mi_grammar.tab.h
 mi_lex.yy.c
+cmd_mapping.c
 gdbvim
 miparser
 miout.log
