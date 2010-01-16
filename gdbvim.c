@@ -25,6 +25,9 @@ extern YY_BUFFER_STATE yy_scan_string(const char *yy_str);
 extern void yy_delete_buffer(YY_BUFFER_STATE b);
 extern void yy_flush_buffer(YY_BUFFER_STATE b);
 
+extern const struct gdb_mi_cmd *is_gdb_mi_cmd(register const char *str,
+					      register unsigned int len);
+
 /* static global variable defitions */
 static gdb_state_t gdbstatus = GDB_STATE_CLI;
 static key_type_t prev_key = KEY_OTHER;
@@ -34,8 +37,10 @@ static int gdb_ptym;
 static int readline_ptym, readline_ptys;
 static int prog_ptym, prog_ptys;
 
-static struct termios save_termios;
+static char *current_gdb_line;
 static int gdb_cmd_len;
+
+static struct termios save_termios;
 
 /* Function definitions */
 gdb_mi_cmd_state_t parse_mi_parsetree(void)
@@ -99,7 +104,7 @@ int create_mi_parsetree(char *str)
 }
 
 /* Strip whitespace(s) from the start and end of a str */
-char *stripws(char *str)
+static char *stripws(char *str)
 {
 	char *head = str;
 	char *tail = &str[strlen(str)];
@@ -109,7 +114,7 @@ char *stripws(char *str)
 	while (*head == ' ' || *head == '\t')
 		head++;
 	if (*head == '\0') { /* head reached the end of the list */
-		/* Consists of only whitespace(s) */
+		/* Consists of only whitespace(s) or empty */
 		return head;
 	}
 	while (*--tail == ' ' || *tail == '\t')
@@ -121,7 +126,7 @@ char *stripws(char *str)
 	return head;
 }
 
-void turn_echo_off(int fd)
+static inline void turn_echo_off(int fd)
 {
 	struct termios stermios;
 
@@ -131,7 +136,7 @@ void turn_echo_off(int fd)
 	tcsetattr(fd, TCSANOW, &stermios);
 }
 
-void turn_echo_on(int fd)
+static inline void turn_echo_on(int fd)
 {
 	struct termios stermios;
 
@@ -139,6 +144,13 @@ void turn_echo_on(int fd)
 	tcgetattr(fd, &stermios);
 	stermios.c_lflag |= ECHO | ECHOE | ECHOK | ECHONL;
 	tcsetattr(fd, TCSANOW, &stermios);
+}
+
+static inline void erase_line(int fd)
+{
+	char c = 0x15;
+
+	write(fd, &c, 1);
 }
 
 /*
@@ -211,13 +223,6 @@ static char *kill_echo(char *char_ptr, int cmd_echo)
 	return char_ptr;
 }
 
-static void erase_line(int fd)
-{
-	char c = 0x15;
-
-	write(fd, &c, 1);
-}
-
 int tab_completion(int count, int key)
 {
 	char gdb_cmd_buf[GDB_CMD_SIZE];
@@ -234,6 +239,159 @@ int tab_completion(int count, int key)
 	prev_key = KEY_TAB;
 
 	return 0;
+}
+
+char *parse_check_cmd_output(char *cmd_list_buf)
+{
+	char *cmd;
+	char *cmd_iter;
+	int cmd_len;
+
+	/* not a valid cmd: (gdb)[space] */
+	if (!(cmd_iter = strchr(cmd_list_buf, '\n')))
+		return NULL;
+
+	cmd_iter++;
+
+	/* unambiguous cmd: break\n(gdb)[space] */
+	if (!strncmp(cmd_iter, "(gdb) ", 6)) {
+		cmd_len = cmd_iter - cmd_list_buf;
+		if (!(cmd = (char *)malloc(cmd_len))) {
+			fprintf(stderr, "Cannot allocate memory\n");
+			return NULL;
+		}
+		strncpy(cmd, cmd_list_buf, cmd_len);
+		cmd[cmd_len - 1] = '\0';
+		return cmd;
+	}
+	/* ambiguous cmd: backtrace\nbreak\nbt\n(gdb)[space] */
+
+	return NULL;
+}
+
+void do_gdb_mi_cmd(gdb_mi_cmd_code_t mi_cmd_code)
+{
+	char gdb_cmd_buf[GDB_CMD_SIZE];
+
+	erase_line(gdb_ptym);
+
+	switch (mi_cmd_code) {
+	case GDB_MI_EXEC_START:
+		sprintf(gdb_cmd_buf, "interpreter mi -exec-start\n");
+		break;
+	case GDB_MI_EXEC_RUN:
+		sprintf(gdb_cmd_buf, "interpreter mi -exec-run\n");
+		break;
+	case GDB_MI_EXEC_CONTINUE:
+		sprintf(gdb_cmd_buf, "interpreter mi -exec-continue\n");
+		break;
+	case GDB_MI_EXEC_UNTIL:
+		sprintf(gdb_cmd_buf, "interpreter mi -exec-until\n");
+		break;
+	case GDB_MI_EXEC_NEXT:
+		sprintf(gdb_cmd_buf, "interpreter mi -exec-next\n");
+		break;
+	case GDB_MI_EXEC_NEXT_INS:
+		sprintf(gdb_cmd_buf, "interpreter mi -exec-next-instruction\n");
+		break;
+	case GDB_MI_EXEC_STEP:
+		sprintf(gdb_cmd_buf, "interpreter mi -exec-step\n");
+		break;
+	case GDB_MI_EXEC_STEP_INS:
+		sprintf(gdb_cmd_buf, "interpreter mi -exec-step-instruction\n");
+		break;
+	case GDB_MI_EXEC_FINISH:
+		sprintf(gdb_cmd_buf, "interpreter mi -exec-finish\n");
+		break;
+	case GDB_MI_EXEC_RETURN:
+		sprintf(gdb_cmd_buf, "interpreter mi -exec-return\n");
+		break;
+	case GDB_MI_EXEC_JUMP:
+		sprintf(gdb_cmd_buf, "interpreter mi -exec-jump\n");
+		break;
+	}
+
+	gdb_cmd_len = strlen(gdb_cmd_buf);
+	write(gdb_ptym, gdb_cmd_buf, gdb_cmd_len);
+}
+
+/* Called when EOF or newline is encountered */
+void do_gdb_cmd(char *line)
+{
+	static gdb_cmd_type_t prev_cmd_type = GDB_CMD_CLI;
+	char gdb_cmd_buf[GDB_CMD_SIZE];
+	char *cmd;
+	const gdb_mi_cmd_t *mi_cmd_ptr;
+
+	/* Check if it is EOF: C-d */
+	if (line) {
+		/*
+		 * Remove leading and trailing whitespace(s) from
+		 * the line. If there is anything left, add it to
+		 * the history list. It is also checked if only
+		 * newline is entered to prevent it from ending up
+		 * in the list.
+		 *
+		 * line == "" means newline is entered -> cmd = ""
+		 * line == "  /t/t   " means all blank -> cmd = ""
+		 */
+		if (*line && *(cmd = stripws(line)) &&
+		    gdbstatus != GDB_STATE_CHECK_CMD)
+			add_history(cmd);
+
+		/*
+		 * When readline library gives the line to the application,
+		 * it strips newline. However, gdb commands should be ended
+		 * with a newline so we set it again.
+		 */
+		// FIXME: Why we need this?
+		if (!*line || !*cmd) { /* previous command */
+			/* readline gives: line = "" */
+			if (prev_cmd_type == GDB_CMD_MI)
+				gdbstatus = GDB_STATE_MI;
+			else
+				gdbstatus = GDB_STATE_CLI;
+			erase_line(gdb_ptym);
+			/* newline produces n\n as echo */
+			gdb_cmd_len = 1;
+			write(gdb_ptym, "\n", 1);
+		}
+		else if ((mi_cmd_ptr = is_gdb_mi_cmd(cmd, strlen(cmd)))
+			 != NULL) {
+			prev_cmd_type = GDB_CMD_MI;
+			gdbstatus = GDB_STATE_MI;
+			do_gdb_mi_cmd(mi_cmd_ptr->code);
+		}
+		else if (gdbstatus == GDB_STATE_CLI) {
+			/*
+			 * We need one more step to decide if it is a
+			 * gdb/cli or gdb/mi cmd. For this, we are
+			 * sending a req to gdb to learn the type of
+			 * cmd.
+			 */
+			gdbstatus = GDB_STATE_CHECK_CMD;
+			erase_line(gdb_ptym);
+			current_gdb_line = strdup(cmd);
+			sprintf(gdb_cmd_buf, "server complete %s\n", cmd);
+			gdb_cmd_len = strlen(gdb_cmd_buf);
+			write(gdb_ptym, gdb_cmd_buf, gdb_cmd_len);
+		}
+		else { /* gdb/cli command */
+			/* readline gives: line = file'\0' */
+			prev_cmd_type = GDB_CMD_CLI;
+			gdbstatus = GDB_STATE_CLI;
+			erase_line(gdb_ptym);
+			sprintf(gdb_cmd_buf, "%s\n", cmd);
+			gdb_cmd_len = strlen(gdb_cmd_buf);
+			write(gdb_ptym, gdb_cmd_buf, gdb_cmd_len);
+		}
+		gdb_out = GDB_OUT_ECHO_INCLUDED;
+
+		free(line);
+	}
+	else { /* EOF */
+		//FIXME: Handle EOF
+	}
 }
 
 gdb_mi_cmd_state_t handle_mi_output(char *gdbbuf)
@@ -270,45 +428,15 @@ void handle_cli_output(char *gdbbuf)
 	gdb_out = GDB_OUT_ECHO_TRIMMED;
 }
 
-int parse_pre_cmd_output(char *cmd_list_buf, char **cmd)
-{
-	char *cmd_iter;
-	int cmd_len;
-
-	write(STDOUT_FILENO, cmd_list_buf, strlen(cmd_list_buf));
-
-	/* not a valid cmd: (gdb)[space] */
-	if (!(cmd_iter = strchr(cmd_list_buf, '\n')))
-		return 2;
-
-	cmd_iter++;
-
-	/* unambiguous cmd: break\n(gdb)[space] */
-	if (!strncmp(cmd_iter, "(gdb) ", 6)) {
-		cmd_len = cmd_iter - cmd_list_buf;
-		if (!(*cmd = (char *)malloc(cmd_len))) {
-			fprintf(stderr, "Cannot allocate memory\n");
-			return 3;
-		}
-		strncpy(*cmd, cmd_list_buf, cmd_len);
-		(*cmd)[cmd_len - 1] = '\0';
-		return 0;
-	}
-	/* ambiguous cmd: backtrace\nbreak\nbt\n(gdb)[space] */
-
-	return 1;
-}
-
-void handle_pre_cmd_output(char *gdbbuf)
+void handle_check_cmd_output(char *gdbbuf)
 {
 	char *ans_ptr = kill_echo(gdbbuf, 1);
-	char *cmd;
+	char *completed_cmd = parse_check_cmd_output(ans_ptr);
 
-	if (!parse_pre_cmd_output(ans_ptr, &cmd))
-		free(cmd);
-
-	gdbstatus = GDB_STATE_CLI;
-	gdb_out = GDB_OUT_ECHO_TRIMMED;
+	if (completed_cmd)
+		do_gdb_cmd(completed_cmd);
+	else
+		do_gdb_cmd(current_gdb_line);
 }
 
 void handle_completion_output(char *gdbbuf)
@@ -347,68 +475,6 @@ void handle_completion_output(char *gdbbuf)
 	gdbstatus = GDB_STATE_CLI;
 }
 
-/* Called when EOF or newline is encountered */
-void handle_gdb_input(char *line)
-{
-	static gdb_cmd_type_t prev_cmd_type = GDB_CMD_CLI;
-	char gdb_cmd_buf[GDB_CMD_SIZE];
-	char *cmd;
-
-	/* Check if it is EOF: C-d */
-	if (line) {
-		/*
-		 * Remove leading and trailing whitespace(s) from
-		 * the line. If there is anything left, add it to
-		 * the history list. It is also checked if only
-		 * newline is entered to prevent it from ending up
-		 * in the list.
-		 */
-		if (*line && *(cmd = stripws(line)))
-			add_history(cmd);
-
-		/*
-		 * When readline library gives the line to the application,
-		 * it strips newline. However, gdb commands should be ended
-		 * with a newline so we set it again.
-		 */
-		// FIXME: Why we need this?
-		if (!*line || !*cmd) { /* previous command */
-			/* readline gives: line = "" */
-			if (prev_cmd_type == GDB_CMD_MI)
-				gdbstatus = GDB_STATE_MI;
-			else
-				gdbstatus = GDB_STATE_CLI;
-			erase_line(gdb_ptym);
-			/* newline produces n\n as echo */
-			gdb_cmd_len = 1;
-			write(gdb_ptym, "\n", 1);
-		}
-		else if (*cmd == '-') { /* gdb/mi command */
-			/* readline gives: -exec-next'\0' */
-			prev_cmd_type = GDB_CMD_MI;
-			gdbstatus = GDB_STATE_MI;
-			erase_line(gdb_ptym);
-			sprintf(gdb_cmd_buf, "interpreter mi %s\n", cmd);
-			gdb_cmd_len = strlen(gdb_cmd_buf);
-			write(gdb_ptym, gdb_cmd_buf, gdb_cmd_len);
-		}
-		else { /* gdb/cli command */
-			/* readline gives: line = next'\0' */
-			prev_cmd_type = GDB_CMD_CLI;
-			gdbstatus = GDB_STATE_CLI;
-			erase_line(gdb_ptym);
-			sprintf(gdb_cmd_buf, "%s\n", cmd);
-			gdb_cmd_len = strlen(gdb_cmd_buf);
-			write(gdb_ptym, gdb_cmd_buf, gdb_cmd_len);
-		}
-		gdb_out = GDB_OUT_ECHO_INCLUDED;
-
-		free(line);
-	}
-	else { /* EOF */
-		//FIXME: Handle EOF
-	}
-}
 
 void handle_user_input(char *inbuf)
 {
@@ -416,7 +482,6 @@ void handle_user_input(char *inbuf)
 
 	/* gdb or prog input */
 	if (gdbstatus == GDB_STATE_CLI) { /* input for gdb */
-		/*rl_callback_read_char();*/
 		nread = read(STDIN_FILENO, inbuf, IN_BUF_SIZE);
 		if (*inbuf != '\t')
 			prev_key = KEY_OTHER;
@@ -538,7 +603,7 @@ int main_loop(void)
 				handle_completion_output(gdbbuf);
 			else if (gdbstatus == GDB_STATE_CHECK_CMD) {
 				if (!get_gdb_output(gdbbuf, "(gdb) "))
-					handle_pre_cmd_output(gdbbuf);
+					handle_check_cmd_output(gdbbuf);
 			}
 			else { /* GDB_STATE_MI */
 				/*
@@ -706,7 +771,7 @@ static int init_readline (void)
 	rl_bind_key('\t', tab_completion);
 
 	rl_already_prompted = 1;
-	rl_callback_handler_install("(gdb) ", handle_gdb_input);
+	rl_callback_handler_install("(gdb) ", do_gdb_cmd);
 
 	/* Set the terminal type to dumb so the output of readline can be
 	* understood by tgdb */

@@ -2,6 +2,7 @@
 #define __GDBVIM_H__
 
 #include "mi_parser.h"
+#include "mi_cmd_list.h"
 
 typedef enum key_type {
 	KEY_TAB,

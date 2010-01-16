@@ -1,0 +1,37 @@
+%{
+#include "mi_cmd_list.h"
+%}
+
+%ignore-case
+%language=ANSI-C
+%compare-strncmp
+%readonly-tables
+
+/* %switch=1 */
+
+%define word-array-name gdb_mi_cmd_list
+%define lookup-function-name is_gdb_mi_cmd
+
+%struct-type
+
+struct gdb_mi_cmd;
+%%
+start, GDB_MI_EXEC_START
+run, GDB_MI_EXEC_RUN
+r, GDB_MI_EXEC_RUN
+continue, GDB_MI_EXEC_CONTINUE
+c, GDB_MI_EXEC_CONTINUE
+until, GDB_MI_EXEC_UNTIL
+u, GDB_MI_EXEC_UNTIL
+next, GDB_MI_EXEC_NEXT
+n, GDB_MI_EXEC_NEXT
+nexti, GDB_MI_EXEC_NEXT_INS
+ni, GDB_MI_EXEC_NEXT_INS
+step, GDB_MI_EXEC_STEP
+s, GDB_MI_EXEC_STEP
+stepi, GDB_MI_EXEC_STEP_INS
+si, GDB_MI_EXEC_STEP_INS
+finish, GDB_MI_EXEC_FINISH
+return, GDB_MI_EXEC_RETURN
+jump, GDB_MI_EXEC_JUMP
+j, GDB_MI_EXEC_JUMP
