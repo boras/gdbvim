@@ -241,7 +241,7 @@ int tab_completion(int count, int key)
 	return 0;
 }
 
-void do_gdb_mi_cmd(gdb_mi_cmd_code_t mi_cmd_code)
+void do_gdb_mi_cmd(gdb_mi_cmd_code_t mi_cmd_code, char *args)
 {
 	char gdb_cmd_buf[GDB_CMD_SIZE];
 
@@ -252,34 +252,76 @@ void do_gdb_mi_cmd(gdb_mi_cmd_code_t mi_cmd_code)
 		sprintf(gdb_cmd_buf, "interpreter mi -exec-start\n");
 		break;
 	case GDB_MI_EXEC_RUN:
-		sprintf(gdb_cmd_buf, "interpreter mi -exec-run\n");
+		if (args) /* arguments given to the inferior */
+			sprintf(gdb_cmd_buf,
+				"interpreter mi \"-exec-run %s\"\n",
+				args);
+		else
+			sprintf(gdb_cmd_buf, "interpreter mi -exec-run\n");
 		break;
 	case GDB_MI_EXEC_CONTINUE:
-		sprintf(gdb_cmd_buf, "interpreter mi -exec-continue\n");
+		if (args) /* ignore-count */
+			sprintf(gdb_cmd_buf,
+				"interpreter mi \"-exec-continue %s\"\n",
+				args);
+		else
+			sprintf(gdb_cmd_buf, "interpreter mi -exec-continue\n");
 		break;
 	case GDB_MI_EXEC_UNTIL:
-		sprintf(gdb_cmd_buf, "interpreter mi -exec-until\n");
+		if (args) /* location */
+			sprintf(gdb_cmd_buf,
+				"interpreter mi \"-exec-until %s\"\n",
+				args);
+		else
+			sprintf(gdb_cmd_buf, "interpreter mi -exec-until\n");
 		break;
 	case GDB_MI_EXEC_NEXT:
-		sprintf(gdb_cmd_buf, "interpreter mi -exec-next\n");
+		if (args) /* the number of lines */
+			sprintf(gdb_cmd_buf,
+				"interpreter mi \"-exec-next %s\"\n",
+				args);
+		else
+			sprintf(gdb_cmd_buf, "interpreter mi -exec-next\n");
 		break;
 	case GDB_MI_EXEC_NEXT_INS:
-		sprintf(gdb_cmd_buf, "interpreter mi -exec-next-instruction\n");
+		if (args) /* the number of instructions */
+			sprintf(gdb_cmd_buf,
+				"interpreter mi \"-exec-next-instruction %s\"\n",
+				args);
+		else
+			sprintf(gdb_cmd_buf,
+				"interpreter mi -exec-next-instruction\n");
 		break;
 	case GDB_MI_EXEC_STEP:
-		sprintf(gdb_cmd_buf, "interpreter mi -exec-step\n");
+		if (args) /* the number of lines */
+			sprintf(gdb_cmd_buf,
+				"interpreter mi \"-exec-step %s\"\n",
+				args);
+		else
+			sprintf(gdb_cmd_buf, "interpreter mi -exec-step\n");
 		break;
 	case GDB_MI_EXEC_STEP_INS:
-		sprintf(gdb_cmd_buf, "interpreter mi -exec-step-instruction\n");
+		if (args) /* the number of instructions */
+			sprintf(gdb_cmd_buf,
+				"interpreter mi \"-exec-step-instruction %s\"\n",
+				args);
+		else
+			sprintf(gdb_cmd_buf,
+				"interpreter mi -exec-step-instruction\n");
+		break;
+	case GDB_MI_EXEC_JUMP:
+		if (args) /* location */
+			sprintf(gdb_cmd_buf,
+				"interpreter mi \"-exec-jump %s\"\n",
+				args);
+		else
+			sprintf(gdb_cmd_buf, "interpreter mi -exec-jump\n");
 		break;
 	case GDB_MI_EXEC_FINISH:
 		sprintf(gdb_cmd_buf, "interpreter mi -exec-finish\n");
 		break;
 	case GDB_MI_EXEC_RETURN:
 		sprintf(gdb_cmd_buf, "interpreter mi -exec-return\n");
-		break;
-	case GDB_MI_EXEC_JUMP:
-		sprintf(gdb_cmd_buf, "interpreter mi -exec-jump\n");
 		break;
 	}
 
@@ -375,7 +417,7 @@ void do_gdb_cmd(char *line)
 		else if ((mi_cmd_ptr = is_gdb_mi_cmd(cmd, cmd_len)) != NULL) {
 			prev_cmd_type = GDB_CMD_MI;
 			gdbstatus = GDB_STATE_MI;
-			do_gdb_mi_cmd(mi_cmd_ptr->code);
+			do_gdb_mi_cmd(mi_cmd_ptr->code, args);
 		}
 		else if (gdbstatus == GDB_STATE_CLI) {
 			/*
@@ -647,18 +689,12 @@ int main_loop(void)
 			return ret;
 		}
 
-		if (fds[0].revents == POLLIN) {
-			/*
-			 * gdb/cli or prog input. Commands are read by
-			 * readline library. Tab completion should be there.
-			 * Afterwards they are converted to gdb/mi input
-			 * commands.
-			 */
+		if (fds[0].revents == POLLIN) /* gdb or prog input */
 			handle_user_input(inbuf);
-		}
 
 		if (fds[3].revents == POLLIN) /* readline input */
 			rl_callback_read_char();
+
 		if (fds[4].revents == POLLIN) { /* readline output */
 			nread = read(fds[4].fd, outbuf, OUT_BUF_SIZE);
 			write(STDOUT_FILENO, outbuf, nread);
@@ -670,13 +706,6 @@ int main_loop(void)
 		}
 
 		if (fds[1].revents == POLLIN) { /* gdb output */
-			/*
-			 * gdb output. Two things should be done.
-			 * 1. gdb/mi output is converted to the gdb/cli form.
-			 * 2. file and line information is obtained to have
-			 * Vim show the file and line in question by using
-			 * signs.
-			 */
 			if (gdbstatus == GDB_STATE_CLI) {
 				if (!get_gdb_output(gdbbuf, "(gdb) "))
 					handle_cli_output(gdbbuf);
