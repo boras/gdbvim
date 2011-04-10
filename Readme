@@ -1,0 +1,38 @@
+
+Yet another gdb VIM frontend.
+
+There are gdb frontends to VIM. The most stable one is Clewn, the web
+site is http://clewn.sourceforge.net/. For the others, have a look
+at http://www.vim.org/scripts/. The first thing which comes to one's
+mind if there are frontends already developed for VIM is why you need
+to develop another gdb frontend? What are the differences?
+
+First of all, the aim here is to supply a gdb console interface to a
+VIM session also running on the console (terminal emulator) window.
+Clewn has one solution called vimGdb in which gdb is called from VIM
+and rendered onto a VIM window. Some keys are mapped to ease the use,
+that means, some keymappings of VIM are masked. It's like a gdb
+session inside of VIM. However, the feeling and usability are not.
+You do not have easy access to gdb console, which needs to be opened
+every time when you want to input commands. This is very annoying for
+people like me who prefers gdb console to enter commands. Another
+point which needs to be stated is the necessity of VIM being patched
+and built in order for this program to be used.
+
+After having examined some alternatives which are directly linked with
+VIM, I looked at other projects which are indirectly linked with VIM
+such as gdb TUI interface and cgdb, http://cgdb.sourceforge.net/. gdb
+TUI interface and cgdb both have gdb consoles with which I prefer to
+work along with some very basic VIM-like editing facility, which in
+fact is not what I am looking for. Thus, I decided to write my own
+version: a gdb console cooperating with VIM through VIM client-server
+feature in the same console (terminal emulator) window. With this, you
+will have one console (terminal emulator) window containing both a VIM
+session (mostly at the top) and a gdb console (mostly at the bottom),
+entering commands in the gdb console at your will while the file in
+question will be displayed by VIM. Also connection from VIM to gdb
+will be possible so as to enable things like setting and clearing
+breakpoints while inspecting codes in VIM. Another advantage is that
+it does not require VIM to be patched and built. It is a standalone
+program.
+
